@@ -1,0 +1,45 @@
+The content of the Website was taken from the old website - Developed by Voxforem
+
+Enhancements
+Phase 1
+1) Removed plagarism
+2) Revamped SEO logic (new sitemap.xml & robots.txt)
+3) Added new blog pages
+4) Added ZOHO forms for integration with ZOHO
+5) Added new gallery section with pictures that can be viewed by clicking on
+6) Email was changed from webmail to zoho mail.
+7) New images were added alongside the existing ones.
+Phase 2
+1) Created a manual form for data collection
+2) Created an admin portal for viewing the data collected in the database as well as to track tasks given.
+3) Role based privelleges have been also added.
+Detailed information on the website portal:
+1)We have 3 types of user access for the portal who have different privelleges each. They are 'admin', 'manager' & user.
+2)Each user can log in to the website portal with their given login credentials through the main login portal which can be found at euroglobalconsultancy.com/portal-login.html
+3)All users will be greeted with a welcome page which is euroglobalconsultancy.com/welcome.php
+4)The admin will have 4 different buttons each with their own purpose, manager will have 2 different buttons & the user will have only 1 button.
+5)The 4 buttons for the admin are Data Display (page to display the captured data from the form), Tasks (page to display tasks given to managers or users), Create User (page to create new users) & View Users (page to view users already created and either edit or delete them).
+6)The 2 button for the manager are the Tasks & View Users.
+7)The button for the user is the Tasks.
+8)Within the Data Display page the admin can view the captured data, filter them by Service or Country & even export the records in the format of CSV.
+9)In the Tasks page the admin or manager can create new tasks by filling the form within the page & also view existing tasks that have already been created. The only difference for the admin and the manager within this page is that the admin can assign tasks to all managers or users from all departments but the manager can only assign tasks to themselves or users within their department.
+10)The admin and the manager have the privelleges to edit or delete the tasks that will be displayed to them according to their access.
+11)The Create User page allows the admin to create users with their respective role and assign them to their department.
+12)The View Users page displays all the users grouped by their department for the admin and only shows the users within the same department for the manager. 
+
+Technical Details
+Phase 1
+1) New website template was used from https://elements.envato.com/charles-business-consulting-html-template-K5VJAD
+2) JavaScript Libraries used are JQuery, BootStrap, Popper JS, Camera Slider (Used in carousel), slimmenu (for the menus in the header), wowjs, owl carousel, countto and fancybox.
+Phase 2
+1) MySQL database and PHP were used for points 1,2 & 3
+
+Version Control
+Github location - https://github.com/Sadu-sadullah/EuroGlobalConsultancy_Updated
+
+Cpanel Details
+Hosting Location - GoDaddy
+
+Additional Notes
+1) The old website backup is in the new website location.
+2) Social media handles were tweaked to accomadate the changes made in the website.

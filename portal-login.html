@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Page</title>
+    <link rel="icon" type="image/png" sizes="56x56" href="images/logo/logo-2.1.ico" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            height: 100vh; /* Added to ensure vertical centering */
+            margin: 0; /* Added to remove default margin */
+        }
+
+        .login-container {
+            position: absolute; /* Changed to position absolutely */
+            top: 50%; /* Vertical centering */
+            left: 50%; /* Horizontal centering */
+            transform: translate(-50%, -50%); /* Adjusted for perfect centering */
+            width: 300px;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .login-form {
+            display: flex;
+            flex-direction: column;
+            align-items: center; /* This should already be present, but double-check */
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .input-field-group { /* New class to target input field groups */
+            margin-right: 20px; /* Apply margin-right to input field groups */
+        }
+
+        .input-group label {
+            margin-bottom: 5px;
+            text-align: left; /* Adjusted to left align with input */
+            width: 100%; /* Ensured full width for alignment */
+        }
+
+        .input-group input {
+            width: 100%;
+            height: 40px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        .submit-btn {
+            width: 100%; /* Reset width to 100% for the submit button */
+            height: 40px;
+            background-color: #002c5f;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 0 auto; /* Ensure horizontal centering */
+        }
+
+        .submit-btn:hover {
+            background-color: #02438e;
+        }
+
+        .forgot-pwd {
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        .forgot-pwd a {
+            text-decoration: none;
+            color: #002c5f;
+        }
+
+        .forgot-pwd a:hover {
+            color: #02438e;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <form action="login.php" method="post" class="login-form">
+            <img src="images/logo/logo.webp" alt="Company Logo" style="margin-bottom: 20px;">
+            <div class="input-group input-field-group"> <!-- Added new class here -->
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required>
+            </div>
+            <div class="input-group input-field-group"> <!-- Added new class here -->
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <div class="input-group"> <!-- No new class here for the submit button -->
+                <button type="submit" class="submit-btn">Login</button>
+            </div>
+            <p class="forgot-pwd">Forgot <a href="reset-password.php">Password?</a></p>
+        </form>
+    </div>
+    <script>
+        // Function to get query parameter by name
+        function getQueryParam(name) {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get(name);
+        }
+
+        // Check if 'reset' parameter is set to 'success'
+        if (getQueryParam('reset') === 'success') {
+            alert("Password has been reset successfully. Please log in with your new password.");
+        }
+    </script>
+</body>
+</html>

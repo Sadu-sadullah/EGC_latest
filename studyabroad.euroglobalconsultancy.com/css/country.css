@@ -1,0 +1,160 @@
+
+
+.wrapper_country .dropdown dd,.wrapper_country .dropdown dt,.wrapper_country .dropdown ul {
+	margin: 0px;
+	padding: 0px;
+}
+.wrapper_country .dropdown dd ul li a span:first-child,.wrapper_country .dropdown dt a span span:first-child {
+	background-image: url('https://i.imgur.com/OQiDoZe.png');
+	background-repeat: no-repeat;
+	width: 16px;
+	height: 11px;
+	display: inline-block;
+	margin:5px;
+	vertical-align: top;
+}
+.wrapper_country .dropdown dt a span {
+	cursor: pointer;
+display: flex;
+	white-space: nowrap;
+}
+.wrapper_country .dropdown dt a img {
+	position: relative;
+	z-index: 1;
+}
+
+.wrapper_country .dropdown dt a span span {
+	display: inline-block;
+	padding: 0;
+}
+.wrapper_country .dropdown dt a span span:first-child {
+	padding: 0;
+    margin-top: 8px !important;
+}
+.wrapper_country .dropdown dd {
+	position: relative;
+}
+.wrapper_country .dropdown a,.wrapper_country .dropdown a:visited {
+	color: #4a535f;
+	text-decoration: none;
+	outline: none;
+}
+.wrapper_country .dropdown a:hover {
+	color: #5d4617;
+}
+.wrapper_country .dropdown dt a:hover,.wrapper_country .dropdown dt a:focus {
+	color: #5d4617;
+}
+
+
+
+.wrapper_country .dropdown dd ul {
+	background: #f0f2f7;
+	
+	color: #C5C0B0;
+	display: none;
+    left: 0px;
+    padding: 5px 5px;
+    position: absolute;
+    width: 300px;
+    border: 1px solid #999;
+    list-style: none;
+    max-height: 216px;
+    overflow-y: scroll;
+    top: 10px;
+    z-index: 3;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+
+.wrapper_country li a span:nth-child(2) {
+    line-height: 2em;
+}
+.wrapper_country .dropdown dd ul::-webkit-scrollbar-track {
+ -webkit-box-shadow: inset 0 0 1px rgba(0,0,0,0.3);
+ border-left:1px solid rgba(0,0,0,0.1);
+}
+.wrapper_country .dropdown dd ul::-webkit-scrollbar-thumb {
+ background: rgba(0,0,0,0.4);
+/*-webkit-box-shadow: inset 0 0 1px rgba(0,0,0,0.5), 1px 0 0 #5cace9 inset, 2px 0 0 #b3d5ee inset;
+    border-radius:10px;*/
+}
+.wrapper_country .dropdown dd ul::-webkit-scrollbar-thumb:window-inactive {
+ background: blue;
+}
+.wrapper_country .dropdown span.value {
+	display: none;
+}
+.wrapper_country .dropdown dd ul li a {
+	display: block;
+	font-size: 12px !important;
+    display: flex;
+  align-items: center;
+}
+.wrapper_country .dropdown dd ul li a:hover {
+	background-color: rgba(0,0,0,0.05);
+}
+.wrapper_country dl.dropdown {
+	display: inline-block;
+    margin: 0;
+}
+.wrapper_country dl.dropdown span:nth-child(3) {
+	color: rgba(0,0,0,0.4)
+}
+.wrapper_country dl.dropdown > span:nth-child(2) {
+	overflow: hidden;
+	white-space: nowrap;
+	display: inline-block;
+}
+.wrapper_country dl.dropdown span:nth-child(3) {
+	float: right;
+    font-size: 13px;
+}
+.wrapper_country dl.dropdown dt span:nth-child(2) {
+	color: rgba(0, 0, 0, 0.6);
+    font-size: 14px;
+    font-weight: bold;
+    line-height: 1.6em;
+}
+.wrapper_country dl.dropdown dt span:nth-child(2) {
+	display: none;
+}
+.wrapper_country .countryFlag {
+	padding: 0;
+	background-image: url("https://i.imgur.com/OQiDoZe.png");
+	background-repeat: no-repeat;
+	display: inline-block;
+	height: 11px;
+	margin-right: 4px;
+	width: 16px;
+	cursor: pointer;
+	white-space: nowrap;
+	-moz-border-bottom-colors: none;
+	-moz-border-left-colors: none;
+	-moz-border-right-colors: none;
+	-moz-border-top-colors: none;
+	border-color: #BFBFC1 #B6B6B6 #969696;
+	border-image: none;
+	border-radius: 2px 2px 2px 2px;
+	border-style: solid;
+	border-width: 1px;
+	box-shadow: 0 1px 1px rgba(0, 0, 0, 0.09);
+}
+.country_row{
+    padding: 0;
+}
+.country_row .col-md-8{
+    padding-right: 0;
+}
+
+.whatsapp {
+    right: 5px;}
+.wrapper_country{
+    margin-left: 15px !important;
+    padding: 0 !important;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 52px;
+}
+
