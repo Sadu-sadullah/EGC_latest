@@ -10,6 +10,9 @@ require 'PHPMailer-master/src/Exception.php';
 require 'PHPMailer-master/src/PHPMailer.php';
 require 'PHPMailer-master/src/SMTP.php';
 
+// Include the permissions file
+require 'permissions.php';
+
 session_start();
 
 // Check if the user is not logged in
@@ -93,11 +96,11 @@ if ($userResult->num_rows > 0) {
     $hasMultipleDepartments = false;
 }
 
-// Fetch users for task assignment (admin and manager roles)
+// Fetch users for task assignment (assign_tasks privilege & Tasks module)
 $users = [];
-if ($user_role === 'Admin' || $user_role === 'Manager') {
-    if ($user_role === 'Admin') {
-        // Admin can assign tasks to users and managers
+if (hasPermission('assign_tasks', 'Tasks')) {
+    if (hasPermission('assign_to_any_user_tasks', 'Tasks')) {
+        // assign_to_any_user_tasks privilege can assign tasks to users and managers
         $userQuery = "
             SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role 
             FROM users u
@@ -108,7 +111,7 @@ if ($user_role === 'Admin' || $user_role === 'Manager') {
             GROUP BY u.id
         ";
     } else {
-        // Manager can only assign tasks to users in their department
+        // others can only assign tasks to users in their department
         $userQuery = "
             SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role 
             FROM users u
@@ -122,7 +125,7 @@ if ($user_role === 'Admin' || $user_role === 'Manager') {
     }
 
     $stmt = $conn->prepare($userQuery);
-    if ($user_role === 'Manager') {
+    if (!hasPermission('assign_to_any_user_tasks', 'Tasks')) {
         $stmt->bind_param("i", $user_id);
     }
     $stmt->execute();
@@ -231,8 +234,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
     }
 }
 
-$taskQuery = $user_role === 'Admin'
-    ? "
+if (hasPermission('view_all_tasks', 'Tasks')) {
+    // Admin-like query: Fetch all tasks
+    $taskQuery = "
         SELECT 
             tasks.task_id,
             tasks.project_name,
@@ -241,14 +245,14 @@ $taskQuery = $user_role === 'Admin'
             tasks.planned_start_date,
             tasks.planned_finish_date,
             tasks.actual_start_date,
-            tasks.actual_finish_date AS task_actual_finish_date, -- Alias for tasks.actual_finish_date
+            tasks.actual_finish_date AS task_actual_finish_date,
             tasks.status,
             tasks.project_type,
             tasks.recorded_timestamp,
             tasks.assigned_by_id,
             tasks.user_id,
             task_transactions.delayed_reason,
-            task_transactions.actual_finish_date AS transaction_actual_finish_date, -- Alias for task_transactions.actual_finish_date
+            task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
             assigned_to_user.username AS assigned_to, 
             GROUP_CONCAT(DISTINCT assigned_to_department.name SEPARATOR ', ') AS assigned_to_department, 
@@ -270,89 +274,99 @@ $taskQuery = $user_role === 'Admin'
                 WHEN tasks.status = 'Closed' THEN tasks.planned_finish_date 
             END DESC, 
             tasks.recorded_timestamp DESC
-    "
-    : ($user_role === 'Manager'
-        ? "
-            SELECT 
-                tasks.task_id,
-                tasks.project_name,
-                tasks.task_name,
-                tasks.task_description,
-                tasks.planned_start_date,
-                tasks.planned_finish_date,
-                tasks.actual_start_date,
-                tasks.actual_finish_date AS task_actual_finish_date, -- Alias for tasks.actual_finish_date
-                tasks.status,
-                tasks.project_type,
-                tasks.recorded_timestamp,
-                tasks.assigned_by_id,
-                tasks.user_id,
-                task_transactions.delayed_reason,
-                task_transactions.actual_finish_date AS transaction_actual_finish_date, -- Alias for task_transactions.actual_finish_date
-                tasks.completion_description,
-                assigned_to_user.username AS assigned_to, 
-                GROUP_CONCAT(DISTINCT assigned_to_department.name SEPARATOR ', ') AS assigned_to_department, 
-                assigned_by_user.username AS assigned_by,
-                GROUP_CONCAT(DISTINCT assigned_by_department.name SEPARATOR ', ') AS assigned_by_department 
-            FROM tasks 
-            LEFT JOIN task_transactions ON tasks.task_id = task_transactions.task_id
-            JOIN users AS assigned_to_user ON tasks.user_id = assigned_to_user.id 
-            JOIN user_departments AS assigned_to_ud ON assigned_to_user.id = assigned_to_ud.user_id
-            JOIN departments AS assigned_to_department ON assigned_to_ud.department_id = assigned_to_department.id
-            JOIN users AS assigned_by_user ON tasks.assigned_by_id = assigned_by_user.id 
-            JOIN user_departments AS assigned_by_ud ON assigned_by_user.id = assigned_by_ud.user_id
-            JOIN departments AS assigned_by_department ON assigned_by_ud.department_id = assigned_by_department.id
-            WHERE assigned_to_ud.department_id IN (SELECT department_id FROM user_departments WHERE user_id = ?)
-            GROUP BY tasks.task_id
-            ORDER BY 
-                CASE 
-                    WHEN tasks.status = 'Completed on Time' THEN tasks.planned_finish_date 
-                    WHEN tasks.status = 'Delayed Completion' THEN task_transactions.actual_finish_date 
-                    WHEN tasks.status = 'Closed' THEN tasks.planned_finish_date 
-                END DESC, 
-                tasks.recorded_timestamp DESC
-        "
-        : "
-            SELECT 
-                tasks.task_id,
-                tasks.project_name,
-                tasks.task_name,
-                tasks.task_description,
-                tasks.planned_start_date,
-                tasks.planned_finish_date,
-                tasks.actual_start_date,
-                tasks.actual_finish_date AS task_actual_finish_date, -- Alias for tasks.actual_finish_date
-                tasks.status,
-                tasks.project_type,
-                tasks.recorded_timestamp,
-                tasks.assigned_by_id,
-                tasks.user_id,
-                task_transactions.delayed_reason,
-                task_transactions.actual_finish_date AS transaction_actual_finish_date, -- Alias for task_transactions.actual_finish_date
-                tasks.completion_description,
-                assigned_by_user.username AS assigned_by,
-                GROUP_CONCAT(DISTINCT assigned_by_department.name SEPARATOR ', ') AS assigned_by_department 
-            FROM tasks 
-            LEFT JOIN task_transactions ON tasks.task_id = task_transactions.task_id
-            JOIN users AS assigned_by_user ON tasks.assigned_by_id = assigned_by_user.id 
-            JOIN user_departments AS assigned_by_ud ON assigned_by_user.id = assigned_by_ud.user_id
-            JOIN departments AS assigned_by_department ON assigned_by_ud.department_id = assigned_by_department.id
-            WHERE tasks.user_id = ? 
-            GROUP BY tasks.task_id
-            ORDER BY 
-                CASE 
-                    WHEN tasks.status = 'Completed on Time' THEN tasks.planned_finish_date 
-                    WHEN tasks.status = 'Delayed Completion' THEN task_transactions.actual_finish_date 
-                    WHEN tasks.status = 'Closed' THEN tasks.planned_finish_date 
-                END DESC, 
-                tasks.recorded_timestamp DESC
-        ");
+    ";
+} elseif (hasPermission('view_department_tasks', 'Tasks')) {
+    //Fetch tasks for users in the same department
+    $taskQuery = "
+        SELECT 
+            tasks.task_id,
+            tasks.project_name,
+            tasks.task_name,
+            tasks.task_description,
+            tasks.planned_start_date,
+            tasks.planned_finish_date,
+            tasks.actual_start_date,
+            tasks.actual_finish_date AS task_actual_finish_date,
+            tasks.status,
+            tasks.project_type,
+            tasks.recorded_timestamp,
+            tasks.assigned_by_id,
+            tasks.user_id,
+            task_transactions.delayed_reason,
+            task_transactions.actual_finish_date AS transaction_actual_finish_date,
+            tasks.completion_description,
+            assigned_to_user.username AS assigned_to, 
+            GROUP_CONCAT(DISTINCT assigned_to_department.name SEPARATOR ', ') AS assigned_to_department, 
+            assigned_by_user.username AS assigned_by,
+            GROUP_CONCAT(DISTINCT assigned_by_department.name SEPARATOR ', ') AS assigned_by_department 
+        FROM tasks 
+        LEFT JOIN task_transactions ON tasks.task_id = task_transactions.task_id
+        JOIN users AS assigned_to_user ON tasks.user_id = assigned_to_user.id 
+        JOIN user_departments AS assigned_to_ud ON assigned_to_user.id = assigned_to_ud.user_id
+        JOIN departments AS assigned_to_department ON assigned_to_ud.department_id = assigned_to_department.id
+        JOIN users AS assigned_by_user ON tasks.assigned_by_id = assigned_by_user.id 
+        JOIN user_departments AS assigned_by_ud ON assigned_by_user.id = assigned_by_ud.user_id
+        JOIN departments AS assigned_by_department ON assigned_by_ud.department_id = assigned_by_department.id
+        WHERE assigned_to_ud.department_id IN (SELECT department_id FROM user_departments WHERE user_id = ?)
+        GROUP BY tasks.task_id
+        ORDER BY 
+            CASE 
+                WHEN tasks.status = 'Completed on Time' THEN tasks.planned_finish_date 
+                WHEN tasks.status = 'Delayed Completion' THEN task_transactions.actual_finish_date 
+                WHEN tasks.status = 'Closed' THEN tasks.planned_finish_date 
+            END DESC, 
+            tasks.recorded_timestamp DESC
+    ";
+} elseif (hasPermission('view_own_tasks', 'Tasks')) {
+    //Fetch only tasks assigned to the current user
+    $taskQuery = "
+        SELECT 
+            tasks.task_id,
+            tasks.project_name,
+            tasks.task_name,
+            tasks.task_description,
+            tasks.planned_start_date,
+            tasks.planned_finish_date,
+            tasks.actual_start_date,
+            tasks.actual_finish_date AS task_actual_finish_date,
+            tasks.status,
+            tasks.project_type,
+            tasks.recorded_timestamp,
+            tasks.assigned_by_id,
+            tasks.user_id,
+            task_transactions.delayed_reason,
+            task_transactions.actual_finish_date AS transaction_actual_finish_date,
+            tasks.completion_description,
+            assigned_by_user.username AS assigned_by,
+            GROUP_CONCAT(DISTINCT assigned_by_department.name SEPARATOR ', ') AS assigned_by_department 
+        FROM tasks 
+        LEFT JOIN task_transactions ON tasks.task_id = task_transactions.task_id
+        JOIN users AS assigned_by_user ON tasks.assigned_by_id = assigned_by_user.id 
+        JOIN user_departments AS assigned_by_ud ON assigned_by_user.id = assigned_by_ud.user_id
+        JOIN departments AS assigned_by_department ON assigned_by_ud.department_id = assigned_by_department.id
+        WHERE tasks.user_id = ? 
+        GROUP BY tasks.task_id
+        ORDER BY 
+            CASE 
+                WHEN tasks.status = 'Completed on Time' THEN tasks.planned_finish_date 
+                WHEN tasks.status = 'Delayed Completion' THEN task_transactions.actual_finish_date 
+                WHEN tasks.status = 'Closed' THEN tasks.planned_finish_date 
+            END DESC, 
+            tasks.recorded_timestamp DESC
+    ";
+} else {
+    // No permission: Fetch no tasks
+    $taskQuery = "SELECT NULL";
+}
 
-// Fetch all tasks based on user role
+// Fetch all tasks based on privilege
 $stmt = $conn->prepare($taskQuery);
-if ($user_role === 'Manager' || $user_role === 'User') {
+
+if (hasPermission('view_department_tasks', 'Tasks') || hasPermission('view_own_tasks', 'Tasks')) {
+    // Bind the user ID for Manager and User queries
     $stmt->bind_param("i", $user_id);
 }
+
 $stmt->execute();
 $result = $stmt->get_result();
 $allTasks = $result->fetch_all(MYSQLI_ASSOC);
@@ -946,10 +960,10 @@ function getWeekdayHours($start, $end)
             <div class="sidebar">
                 <h3>Menu</h3>
                 <a href="tasks.php">Tasks</a>
-                <?php if ($user_role === 'Admin' || $user_role === 'Manager'): ?>
+                <?php if (hasPermission('read_users', 'Users')): ?>
                     <a href="view-users.php">View Users</a>
                 <?php endif; ?>
-                <?php if ($user_role === 'Admin'): ?>
+                <?php if (hasPermission('read_roles&departments', 'Roles & Departments')): ?>
                     <a href="view-roles-departments.php">View Role or Department</a>
                 <?php endif; ?>
             </div>
@@ -982,14 +996,16 @@ function getWeekdayHours($start, $end)
                         <!-- Filter Container -->
                         <div class="filter-container">
                             <div class="filter-buttons">
-                                <?php if ($user_role === 'Admin' || $user_role === 'Manager'): ?>
+                                <?php if (hasPermission('create_tasks', 'Tasks')): ?>
                                     <button type="button" class="btn btn-primary" data-bs-toggle="modal"
                                         data-bs-target="#taskManagementModal">
                                         Create New Task
                                     </button>
                                 <?php endif; ?>
                                 <button onclick="resetFilters()" class="btn btn-primary">Reset</button>
-                                <a href="export_tasks.php" class="btn btn-success">Export to CSV</a>
+                                <?php if (hasPermission('export_tasks', 'Tasks')): ?>
+                                    <a href="export_tasks.php" class="btn btn-success">Export to CSV</a>
+                                <?php endif; ?>
                             </div>
 
                             <!-- Filter Dropdowns and Date Range -->
@@ -1008,7 +1024,7 @@ function getWeekdayHours($start, $end)
                                     </select>
                                 </div>
 
-                                <?php if ($user_role === 'Admin' || $hasMultipleDepartments): ?>
+                                <?php if (hasPermission('filter_tasks', 'Tasks') || $hasMultipleDepartments): ?>
                                     <!-- Multi-select dropdown for filtering by department -->
                                     <div class="filter-dropdown">
                                         <label for="department-filter">Filter by Department of Assigned User:</label>
@@ -1137,15 +1153,15 @@ function getWeekdayHours($start, $end)
                                                 // Define the available statuses based on the user role and current status
                                                 $statuses = [];
 
-                                                // Logic for Admin or the user who assigned the task
-                                                if ($user_role === 'Admin' || $assigned_by_id == $user_id) {
-                                                    // Admin or the user who assigned the task can change status to anything except "In Progress", "Completed on Time", and "Delayed Completion"
+                                                // Logic for status_change_main privilege or the user who assigned the task
+                                                if (hasPermission('status_change_main', 'Tasks') || $assigned_by_id == $user_id) {
+                                                    // status_change_main privilege or the user who assigned the task can change status to anything except "In Progress", "Completed on Time", and "Delayed Completion"
                                                     if (in_array($currentStatus, ['Assigned', 'In Progress', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'])) {
                                                         $statuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
                                                     }
                                                 }
                                                 // Logic for Regular User (assigned user)
-                                                elseif ($user_role === 'User' && $user_id == $assigned_user_id) {
+                                                elseif (hasPermission('status_change_normal', 'Tasks') && $user_id == $assigned_user_id) {
                                                     // Regular user can only change status if they are the assigned user
                                                     if ($currentStatus === 'Assigned') {
                                                         // If the task is "Assigned", the next viable options are "In Progress"
@@ -1335,7 +1351,7 @@ function getWeekdayHours($start, $end)
 
                                                 // Define the available statuses based on the user role and current status
                                                 $statuses = [];
-                                                if ($user_role === 'Admin' || $assigned_by_id == $user_id) {
+                                                if (hasPermission('status_change_main', 'Tasks') || $assigned_by_id == $user_id) {
                                                     // Admin or the user who assigned the task can change status to "Closed"
                                                     if (in_array($currentStatus, ['Completed on Time', 'Delayed Completion'])) {
                                                         $statuses = ['Closed'];
