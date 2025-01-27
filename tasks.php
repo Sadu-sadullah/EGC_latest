@@ -15,6 +15,14 @@ require 'permissions.php';
 
 session_start();
 
+if (isset($_COOKIE['user_timezone'])) {
+    $userTimeZone = $_COOKIE['user_timezone'];
+    date_default_timezone_set($userTimeZone);
+} else {
+    // Default timezone if not provided
+    date_default_timezone_set('UTC');
+}
+
 // Check if the user is not logged in
 if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
     header("Location: portal-login.html");
@@ -414,7 +422,6 @@ $completedTasks = array_filter($allTasks, function ($task) {
 
 <!-- Delay logic -->
 <?php
-// Define the getWeekdayHours function once at the top of the script
 function getWeekdayHours($start, $end)
 {
     $weekdayHours = 0;
@@ -1829,6 +1836,12 @@ function getWeekdayHours($start, $end)
 
             <script>
                 $(document).ready(function () {
+                    // Get the user's timezone
+                    const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+                    // Send the timezone to the server (via AJAX or hidden form field)
+                    document.cookie = "user_timezone=" + userTimeZone; // Store it as a cookie
+
                     const tasksPerPage = 10; // Number of tasks per table per page
                     let currentPage = 1; // Current page for both tables
 
