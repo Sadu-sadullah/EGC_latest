@@ -1,5 +1,7 @@
 <?php
 
+require 'permissions.php';
+
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
@@ -52,7 +54,7 @@ try {
     $pdo = new PDO($dsn, $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    if ($user_role === 'Admin') {
+    if (hasPermission('read_all_users', 'Users')) {
         // Admin: View all users except Admins
         $stmt = $pdo->prepare("
             SELECT u.id, u.username, u.email, r.name AS role_name, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments
@@ -65,7 +67,7 @@ try {
             ORDER BY u.username
         ");
         $stmt->execute();
-    } elseif ($user_role === 'Manager') {
+    } elseif (hasPermission('read_department_users', 'Users')) {
         // Manager: View only users in the same department(s), excluding Admins and their own account
         $departmentPlaceholders = implode(',', array_fill(0, count($user_departments), '?'));
         $stmt = $pdo->prepare("
@@ -472,10 +474,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="sidebar">
             <h3>Menu</h3>
             <a href="tasks.php">Tasks</a>
-            <?php if ($user_role === 'Admin' || $user_role === 'Manager'): ?>
+            <?php if (hasPermission('read_users', 'Users')): ?>
                 <a href="view-users.php">View Users</a>
             <?php endif; ?>
-            <?php if ($user_role === 'Admin'): ?>
+            <?php if (hasPermission('read_roles&departments', 'Roles & Departments')): ?>
                 <a href="view-roles-departments.php">View Role or Department</a>
             <?php endif; ?>
         </div>
@@ -518,7 +520,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php unset($_SESSION['deletionMsg']); ?>
                     <?php endif; ?>
 
-                    <?php if ($user_role === 'Admin'): ?>
+                    <?php if (hasPermission('read_all_users', 'Users')): ?>
                         <p>Viewing all users</p>
                         <?php if (!empty($users)): ?>
                             <table>
@@ -559,7 +561,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php else: ?>
                             <p>No users found.</p>
                         <?php endif; ?>
-                    <?php elseif ($user_role === 'Manager'): ?>
+                    <?php elseif (hasPermission('read_department_users', 'Users')): ?>
                         <p>Viewing users in your department(s):
                             <strong><?= htmlspecialchars(implode(', ', $user_departments)) ?></strong>
                         </p>
