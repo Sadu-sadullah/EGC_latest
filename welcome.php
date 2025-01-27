@@ -7,6 +7,8 @@ error_reporting(E_ALL);
 // Start session
 session_start();
 
+require 'permissions.php';
+
 // Check if the user is logged in
 if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
     // Redirect to login page if not logged in
@@ -73,7 +75,7 @@ try {
     }
 
     // Fetch total tasks
-    if ($userRole === 'Admin') {
+    if (hasPermission('view_all_tasks', 'Tasks')) {
         $stmt = $pdo->prepare("SELECT COUNT(*) as total_tasks FROM tasks");
         $stmt->execute();
         $totalTasks = $stmt->fetch(PDO::FETCH_ASSOC)['total_tasks'];
@@ -167,7 +169,7 @@ try {
 
     }
 
-    if ($userRole === 'Manager') {
+    if (hasPermission('view_department_tasks', 'Tasks')) {
         // For manager
         // Fetch total tasks for manager's departments
         $stmt = $pdo->prepare("SELECT COUNT(*) as total_tasks 
@@ -333,7 +335,7 @@ try {
     }
 
     // For User
-    if ($userRole === 'User') {
+    if (hasPermission('view_own_tasks', 'Tasks')) {
         // Fetch total tasks for the user
         $stmt = $pdo->prepare("SELECT COUNT(*) as total_tasks FROM tasks WHERE user_id = :user_id");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
@@ -583,10 +585,10 @@ try {
         <div class="sidebar">
             <h3>Menu</h3>
             <a href="tasks.php">Tasks</a>
-            <?php if ($userRole === 'Admin' || $userRole === 'Manager'): ?>
+            <?php if (hasPermission('read_users', 'Users')): ?>
                 <a href="view-users.php">View Users</a>
             <?php endif; ?>
-            <?php if ($userRole === 'Admin'): ?>
+            <?php if (hasPermission('read_roles&departments', 'Roles & Departments')): ?>
                 <a href="view-roles-departments.php">View Role or Department</a>
             <?php endif; ?>
         </div>
@@ -702,12 +704,12 @@ try {
                     </div>
 
                     <!-- Tasks by Department (Only for Admin and Manager) -->
-                    <?php if ($userRole === 'Admin' || $userRole === 'Manager'): ?>
+                    <?php if (hasPermission('dashboard_tasks', 'Dashboard')): ?>
                         <div class="col-md-4">
                             <div class="card h-100">
                                 <div class="card-body">
                                     <h5 class="card-title">
-                                        <?= ($userRole === 'Manager') ? 'Tasks in My Departments' : 'Tasks by Department' ?>
+                                        <?= (hasPermission('dashboard_tasks_department', 'Dashboard')) ? 'Tasks in My Departments' : 'Tasks by Department' ?>
                                     </h5>
                                     <div class="text-center">
                                         <canvas id="tasksByDepartmentChart"></canvas>
@@ -718,12 +720,12 @@ try {
                     <?php endif; ?>
 
                     <!-- User Performance (Only for Admin and Manager) -->
-                    <?php if ($userRole === 'Admin' || $userRole === 'Manager'): ?>
+                    <?php if (hasPermission('dashboard_tasks', 'Dashboard')): ?>
                         <div class="col-md-4">
                             <div class="card h-100">
                                 <div class="card-body">
                                     <h5 class="card-title">
-                                        <?= ($userRole === 'Manager') ? 'Top Performers in My Departments' : 'Top Performers' ?>
+                                        <?= (hasPermission('dashboard_tasks_department', 'Dashboard')) ? 'Top Performers in My Departments' : 'Top Performers' ?>
                                     </h5>
                                     <ul class="list-group list-group-flush">
                                         <?php foreach ($topPerformers as $performer): ?>
