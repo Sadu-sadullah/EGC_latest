@@ -6,6 +6,8 @@ error_reporting(E_ALL);
 
 session_start();
 
+require 'permissions.php';
+
 // Check if the user is logged in and has admin role
 if (!isset($_SESSION['loggedin']) || $_SESSION['role'] !== 'Admin') {
     header("Location: portal-login.html");
@@ -367,10 +369,10 @@ try {
         <div class="sidebar">
             <h3>Menu</h3>
             <a href="tasks.php">Tasks</a>
-            <?php if ($_SESSION['role'] === 'Admin' || $_SESSION['role'] === 'Manager'): ?>
+            <?php if (hasPermission('read_users', 'Users')): ?>
                 <a href="view-users.php">View Users</a>
             <?php endif; ?>
-            <?php if ($_SESSION['role'] === 'Admin'): ?>
+            <?php if (hasPermission('read_roles&departments', 'Roles & Departments')): ?>
                 <a href="view-roles-departments.php">View Role or Department</a>
             <?php endif; ?>
         </div>
