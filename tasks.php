@@ -197,8 +197,27 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
     $recorded_timestamp = date("Y-m-d H:i:s");
     $assigned_by_id = $_SESSION['user_id'];
 
+    $currentDate = new DateTime();
+
+    // Get the planned start and end dates
+    $datePlannedStartDate = new DateTime($planned_start_date);
+    $datePlannedEndDate = new DateTime($planned_finish_date);
+
+    // Calculate the 3-month boundary dates
+    $threeMonthsAgo = clone $currentDate;
+    $threeMonthsAgo->modify('-3 months');
+
+    $threeMonthsAhead = clone $currentDate;
+    $threeMonthsAhead->modify('+3 months');
+
+    
+
     if (empty($project_name) || empty($task_name) || empty($task_description) || empty($project_type) || empty($planned_start_date) || empty($planned_finish_date) || !$assigned_user_id) {
         echo '<script>alert("Please fill in all required fields.");</script>';
+    }   elseif ($datePlannedStartDate < $threeMonthsAgo || $datePlannedEndDate > $threeMonthsAhead) {
+        echo '<script>alert("Error: Planned start date is too far in the past or too far in the future.");</script>';
+    } elseif ($datePlannedEndDate > $threeMonthsAgo) {
+        echo '<script>alert("Error: Planned end date is too close to the start date.");</script>';
     } else {
         $stmt = $conn->prepare(
             "INSERT INTO tasks (user_id, project_name, task_name, task_description, project_type, planned_start_date, planned_finish_date, status, recorded_timestamp, assigned_by_id) 
