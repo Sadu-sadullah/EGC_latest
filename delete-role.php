@@ -23,6 +23,13 @@ try {
 
     $roleId = $_POST['role_id'];
 
+    // Delete the corresponding role permissions first
+    $permissionStmt = $pdo->prepare("DELETE FROM role_permissions WHERE role_id = :id");
+    $permissionStmt->bindParam(':id', $roleId, PDO::PARAM_INT);
+    if (!$permissionStmt->execute()) {
+        throw new PDOException("Failed to delete role permissions.");
+    }
+
     // Delete the role
     $stmt = $pdo->prepare("DELETE FROM roles WHERE id = :id");
     $stmt->bindParam(':id', $roleId, PDO::PARAM_INT);
@@ -30,7 +37,7 @@ try {
     if ($stmt->execute()) {
         $success = "Role deleted successfully.";
     } else {
-        $error = "Failed to delete role. Please try again.";
+        throw new PDOException("Failed to delete role.");
     }
 
 } catch (PDOException $e) {
