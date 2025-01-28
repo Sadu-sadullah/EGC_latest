@@ -216,8 +216,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
         echo '<script>alert("Please fill in all required fields.");</script>';
     }   elseif ($datePlannedStartDate < $threeMonthsAgo || $datePlannedEndDate > $threeMonthsAhead) {
         echo '<script>alert("Error: Planned start date is too far in the past or too far in the future.");</script>';
-    } elseif ($datePlannedEndDate > $threeMonthsAgo) {
-        echo '<script>alert("Error: Planned end date is too close to the start date.");</script>';
     } else {
         $stmt = $conn->prepare(
             "INSERT INTO tasks (user_id, project_name, task_name, task_description, project_type, planned_start_date, planned_finish_date, status, recorded_timestamp, assigned_by_id) 
