@@ -23,6 +23,8 @@ if (isset($_COOKIE['user_timezone'])) {
     date_default_timezone_set('UTC');
 }
 
+echo date_default_timezone_get();
+
 // Check if the user is not logged in
 if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
     header("Location: portal-login.html");
@@ -210,11 +212,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
     $threeMonthsAhead = clone $currentDate;
     $threeMonthsAhead->modify('+3 months');
 
-    
+
 
     if (empty($project_name) || empty($task_name) || empty($task_description) || empty($project_type) || empty($planned_start_date) || empty($planned_finish_date) || !$assigned_user_id) {
         echo '<script>alert("Please fill in all required fields.");</script>';
-    }   elseif ($datePlannedStartDate < $threeMonthsAgo || $datePlannedEndDate > $threeMonthsAhead) {
+    } elseif ($datePlannedStartDate < $threeMonthsAgo || $datePlannedEndDate > $threeMonthsAhead) {
         echo '<script>alert("Error: Planned start date is too far in the past or too far in the future.");</script>';
     } else {
         $stmt = $conn->prepare(
@@ -1240,11 +1242,43 @@ function getWeekdayHours($start, $end)
                                         <?php if (($user_role !== 'User' && $row['assigned_by_id'] == $_SESSION['user_id']) || $user_role == 'Admin'): ?>
                                             <td>
                                                 <a href="edit-tasks.php?id=<?= $row['task_id'] ?>" class="edit-button">Edit</a>
-                                                <form method="POST" action="delete-task.php" style="display:inline;">
-                                                    <input type="hidden" name="task_id" value="<?= $row['task_id'] ?>">
-                                                    <button type="submit" class="delete-button"
-                                                        onclick="return confirm('Are you sure?')">Delete</button>
-                                                </form>
+                                                <button type="button" class="btn btn-danger" data-bs-toggle="modal"
+                                                    data-bs-target="#deleteModal<?= $row['task_id'] ?>">
+                                                    Delete
+                                                </button>
+                                                <!-- Delete Modal -->
+                                                <div class="modal fade" id="deleteModal<?= $row['task_id'] ?>" tabindex="-1"
+                                                    aria-labelledby="deleteModalLabel" aria-hidden="true">
+                                                    <div class="modal-dialog">
+                                                        <div class="modal-content">
+                                                            <div class="modal-header">
+                                                                <h5 class="modal-title" id="deleteModalLabel">Delete Task</h5>
+                                                                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                                                    aria-label="Close"></button>
+                                                            </div>
+                                                            <div class="modal-body">
+                                                                <form method="POST" action="delete-task.php">
+                                                                    <input type="hidden" name="task_id"
+                                                                        value="<?= $row['task_id'] ?>">
+                                                                    <input type="hidden" name="user_id"
+                                                                        value="<?= $_SESSION['user_id'] ?>">
+                                                                    <div class="mb-3">
+                                                                        <label for="reason" class="form-label">Reason for
+                                                                            deleting the task:</label>
+                                                                        <textarea class="form-control" id="reason" name="reason"
+                                                                            rows="3" required></textarea>
+                                                                    </div>
+                                                                    <div class="modal-footer">
+                                                                        <button type="button" class="btn btn-secondary"
+                                                                            data-bs-dismiss="modal">Cancel</button>
+                                                                        <button type="submit" class="btn btn-danger">Delete
+                                                                            Task</button>
+                                                                    </div>
+                                                                </form>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </td>
                                         <?php else: ?>
 
@@ -2069,7 +2103,6 @@ function getWeekdayHours($start, $end)
 
                         timestampCells.forEach(cell => {
                             const utcTimestamp = cell.getAttribute('data-utc'); // Get the UTC timestamp
-                            console.log('UTC Timestamp:', utcTimestamp); // Debug: Log the UTC timestamp
 
                             const options = {
                                 year: 'numeric',
@@ -2083,8 +2116,6 @@ function getWeekdayHours($start, $end)
 
                             const localTime = new Date(utcTimestamp).toLocaleString('en-US', options);
 
-                            console.log('Local Time:', localTime); // Debug: Log the local time
-
                             // Update the cell content with the local time
                             cell.textContent = localTime;
                         });
@@ -2094,6 +2125,25 @@ function getWeekdayHours($start, $end)
                 });
             </script>
 
+            <script>
+                document.addEventListener('DOMContentLoaded', function () {
+                    // Select all delete buttons
+                    const deleteButtons = document.querySelectorAll('.btn-danger[data-bs-toggle="modal"]');
+                    deleteButtons.forEach(button => {
+                        button.addEventListener('click', function () {
+                            const targetModalId = button.getAttribute('data-bs-target');
+                            const targetModal = document.querySelector(targetModalId);
+
+                            if (targetModal) {
+                                console.log(`Opening modal: ${targetModalId}`);
+                                // Modal opens automatically due to Bootstrap behavior
+                            } else {
+                                console.error(`Modal not found: ${targetModalId}`);
+                            }
+                        });
+                    });
+                }); 
+            </script>
             <!-- To check if task desc is more than 2 lines -->
             <script>
                 document.addEventListener('DOMContentLoaded', function () {

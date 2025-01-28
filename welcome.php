@@ -1262,7 +1262,7 @@ try {
                 }
             });
 
-            <?php if ($userRole === 'Admin' || $userRole === 'Manager'): ?>
+            <?php if (hasPermission('dashboard_tasks', 'Dashboard')): ?>
                 // Tasks by Department (Bar Chart)
                 const tasksByDepartmentChart = new Chart(document.getElementById('tasksByDepartmentChart'), {
                     type: 'bar',

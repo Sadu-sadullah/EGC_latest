@@ -405,7 +405,7 @@ function formatPermissionName($permissionName)
                 <div class="container">
                     <!-- Assign Permissions Section -->
                     <div class="styled-box">
-                        <h1>Assign Permissions</h1>
+                        <h1>Assign Privileges</h1>
                         <?php if ($errorMsg): ?>
                             <div class="alert alert-danger"> <?= htmlspecialchars($errorMsg) ?> </div>
                         <?php elseif ($successMsg): ?>
@@ -436,7 +436,7 @@ function formatPermissionName($permissionName)
                             </div>
 
                             <div class="mb-3">
-                                <label class="form-label">Select Permissions</label>
+                                <label class="form-label">Select Previleges</label>
                                 <?php foreach ($groupedPermissions as $moduleId => $moduleData): ?>
                                     <div class="module-group mb-4">
                                         <h4><?= htmlspecialchars($moduleData['module_name']) ?></h4>
@@ -461,13 +461,13 @@ function formatPermissionName($permissionName)
 
                     <!-- Current Role Permissions Section -->
                     <div class="styled-box">
-                        <h1>Current Role Permissions</h1>
+                        <h1>Current Role Privileges</h1>
                         <table>
                             <thead>
                                 <tr>
                                     <th>Role</th>
                                     <th>Module</th>
-                                    <th>Permissions</th>
+                                    <th>Privileges</th>
                                 </tr>
                             </thead>
                             <tbody>
