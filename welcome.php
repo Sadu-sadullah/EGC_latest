@@ -97,12 +97,20 @@ try {
 
         // Fetch average task duration
         $stmt = $pdo->prepare(
-            "SELECT AVG(TIMESTAMPDIFF(DAY, planned_start_date, planned_finish_date)) as avg_duration FROM tasks WHERE status = 'Completed on Time'"
+            "SELECT AVG(
+                CASE 
+                    WHEN actual_start_date IS NOT NULL AND actual_finish_date IS NOT NULL 
+                    THEN TIMESTAMPDIFF(DAY, actual_start_date, actual_finish_date)
+                    ELSE TIMESTAMPDIFF(DAY, planned_start_date, planned_finish_date)
+                END
+            ) as avg_duration 
+            FROM tasks 
+            WHERE status = 'Completed on Time'"
+
         );
         $stmt->execute();
         $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
-        $avgDuration = $avgDurationResult['avg_duration'] ?? 0; // Default to 0 if null
-        $avgDuration = round($avgDuration, 1); // Now safe to round
+        $avgDuration = round($avgDuration ?? 0, 1); // Default to 0 if null and round
 
         // Fetch tasks by department
         $stmt = $pdo->prepare("
@@ -317,21 +325,28 @@ try {
 
         // Fetch average task duration for manager's departments
         $stmt = $pdo->prepare("
-            SELECT AVG(TIMESTAMPDIFF(DAY, planned_start_date, planned_finish_date)) as avg_duration 
+            SELECT AVG(
+                CASE 
+                    WHEN actual_start_date IS NOT NULL AND actual_finish_date IS NOT NULL 
+                    THEN TIMESTAMPDIFF(DAY, actual_start_date, actual_finish_date)
+                    ELSE TIMESTAMPDIFF(DAY, planned_start_date, planned_finish_date)
+                END
+            ) as avg_duration
             FROM tasks t
             JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE t.status = 'Completed on Time' 
+            WHERE t.status = 'Completed on Time'
             AND ud.department_id IN (
-                SELECT department_id 
-                FROM user_departments 
+                SELECT department_id
+                FROM user_departments
                 WHERE user_id = :user_id
             )
         ");
+
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
         $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
-        $avgDuration = $avgDurationResult['avg_duration'] ?? 0; // Default to 0 if null
-        $avgDuration = round($avgDuration, 1); // Now safe to round
+        $avgDuration = round($avgDuration ?? 0, 1); // Default to 0 if null and round
+
     }
 
     // For User
@@ -395,15 +410,23 @@ try {
 
         // Fetch average task duration for the user
         $stmt = $pdo->prepare("
-        SELECT AVG(TIMESTAMPDIFF(DAY, planned_start_date, planned_finish_date)) as avg_duration 
-        FROM tasks 
-        WHERE status = 'Completed on Time' AND user_id = :user_id
-    ");
+            SELECT AVG(
+                CASE 
+                    WHEN actual_start_date IS NOT NULL AND actual_finish_date IS NOT NULL 
+                    THEN TIMESTAMPDIFF(DAY, actual_start_date, actual_finish_date)
+                    ELSE TIMESTAMPDIFF(DAY, planned_start_date, planned_finish_date)
+                END
+            ) as avg_duration 
+            FROM tasks 
+            WHERE status = 'Completed on Time' 
+            AND user_id = :user_id
+        ");
+
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
         $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
-        $avgDuration = $avgDurationResult['avg_duration'] ?? 0; // Default to 0 if null
-        $avgDuration = round($avgDuration, 1); // Now safe to round
+        $avgDuration = round($avgDuration ?? 0, 1);
+
     }
 
     // Optional: Session timeout settings
