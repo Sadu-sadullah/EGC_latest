@@ -23,8 +23,6 @@ if (isset($_COOKIE['user_timezone'])) {
     date_default_timezone_set('UTC');
 }
 
-echo date_default_timezone_get();
-
 // Check if the user is not logged in
 if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
     header("Location: portal-login.html");
@@ -1949,7 +1947,7 @@ function getWeekdayHours($start, $end)
                             const plannedFinishDate = new Date($(this).find('td:nth-child(6)').text().trim());
                             const actualStartDate = new Date($(this).find('td:nth-child(7)').text().trim()); // Adjust the column index if needed
                             const actualFinishDate = new Date($(this).find('td:nth-child(8)').text().trim()); // Adjust the column index if needed
-                            const taskStatus = $(this).find('td:nth-child(9) select').val() || $(this).find('td:nth-child(7)').text().trim();
+                            const taskStatus = $(this).find('td:nth-child(9) select').val() || $(this).find('td:nth-child(9)').text().trim();
 
                             // Check if the row matches the selected filters
                             const projectMatch = selectedProjects.length === 0 || selectedProjects.includes('All') || selectedProjects.includes(projectName);
