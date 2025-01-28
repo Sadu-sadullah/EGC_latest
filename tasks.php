@@ -1945,33 +1945,32 @@ function getWeekdayHours($start, $end)
                             const departmentName = $(this).find('td:nth-child(12)').text().trim().match(/\(([^)]+)\)/)?.[1] || '';
                             const plannedStartDate = new Date($(this).find('td:nth-child(5)').text().trim());
                             const plannedFinishDate = new Date($(this).find('td:nth-child(6)').text().trim());
-                            const actualStartDate = new Date($(this).find('td:nth-child(7)').text().trim()); // Adjust the column index if needed
-                            const actualFinishDate = new Date($(this).find('td:nth-child(8)').text().trim()); // Adjust the column index if needed
+                            const actualStartDate = new Date($(this).find('td:nth-child(7)').text().trim());
+                            const actualFinishDate = new Date($(this).find('td:nth-child(8)').text().trim());
                             const taskStatus = $(this).find('td:nth-child(9) select').val() || $(this).find('td:nth-child(9)').text().trim();
+
+                            // Enhanced date range filtering
+                            let dateInRange = true;
+                            if (startDate && endDate) {
+                                const filterStartDate = new Date(startDate);
+                                const filterEndDate = new Date(endDate);
+
+                                // Check planned dates
+                                const plannedInRange = plannedStartDate >= filterStartDate && plannedFinishDate <= filterEndDate;
+
+                                // Check actual dates if they exist
+                                const actualInRange = !isNaN(actualStartDate) && !isNaN(actualFinishDate) &&
+                                    actualStartDate >= filterStartDate && actualFinishDate <= filterEndDate;
+
+                                dateInRange = plannedInRange || actualInRange;
+                            }
 
                             // Check if the row matches the selected filters
                             const projectMatch = selectedProjects.length === 0 || selectedProjects.includes('All') || selectedProjects.includes(projectName);
                             const departmentMatch = selectedDepartments.length === 0 || selectedDepartments.includes('All') || departmentName.split(', ').some(dept => selectedDepartments.includes(dept));
                             const statusMatch = tableId !== '#pending-tasks' || selectedStatuses.length === 0 || selectedStatuses.includes('All') || selectedStatuses.includes(taskStatus);
 
-                            // Date filtering logic
-                            let dateMatch = true; // Assume the row matches the date filter by default
-
-                            if (startDate || endDate) {
-                                // Use actual dates if available, otherwise fall back to planned dates
-                                const startDateToCompare = actualStartDate || plannedStartDate;
-                                const finishDateToCompare = actualFinishDate || plannedFinishDate;
-
-                                // Check if the task's dates fall within the selected date range
-                                if (startDate && startDateToCompare < new Date(startDate)) {
-                                    dateMatch = false;
-                                }
-                                if (endDate && finishDateToCompare > new Date(endDate)) {
-                                    dateMatch = false;
-                                }
-                            }
-
-                            if (projectMatch && departmentMatch && statusMatch && dateMatch) {
+                            if (projectMatch && departmentMatch && statusMatch && dateInRange) {
                                 visibleRows.push(this);
                             }
                         });
