@@ -477,11 +477,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <?php if (hasPermission('read_users', 'Users')): ?>
                 <a href="view-users.php">View Users</a>
             <?php endif; ?>
-            <?php if (hasPermission('read_roles&departments', 'Roles & Departments')): ?>
+            <?php if (hasPermission('read_roles_&_departments', 'Roles & Departments')): ?>
                 <a href="view-roles-departments.php">View Role or Department</a>
             <?php endif; ?>
             <?php if (hasPermission('read_&_write_privileges', 'Privileges')): ?>
-                <a href="assign-permission.php">Assign & View Privileges</a>
+                <a href="assign-privilege.php">Assign & View Privileges</a>
             <?php endif; ?>
         </div>
 

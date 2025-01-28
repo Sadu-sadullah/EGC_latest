@@ -2,21 +2,18 @@
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
-
 session_start();
 
-require 'permissions.php';
-
-// Check if the user is logged in and has admin role
+require 'permissions.php'; // Check if the user is logged in and has admin role 
 if (!isset($_SESSION['loggedin']) || $_SESSION['role'] !== 'Admin') {
     header("Location: portal-login.html");
     exit;
-}
-
-// Session timeout for 20 mins
+} // Session timeout for 20 mins
 $timeout_duration = 1200;
-
-if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeout_duration) {
+if (
+    isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) >
+    $timeout_duration
+) {
     session_unset();
     session_destroy();
     header("Location: portal-login.html");
@@ -36,7 +33,27 @@ try {
 
     $roles = $pdo->query("SELECT id, name FROM roles")->fetchAll(PDO::FETCH_ASSOC);
     $modules = $pdo->query("SELECT id, name FROM modules")->fetchAll(PDO::FETCH_ASSOC);
-    $permissions = $pdo->query("SELECT id, name FROM permissions")->fetchAll(PDO::FETCH_ASSOC);
+    // Fetch permissions with their module information
+    $permissions = $pdo->query("
+    SELECT p.id, p.name, m.name AS module_name, m.id AS module_id
+    FROM permissions p
+    JOIN role_permissions rp ON p.id = rp.permission_id
+    JOIN modules m ON rp.module_id = m.id
+    GROUP BY p.id, m.id
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    // Group permissions by module
+    $groupedPermissions = [];
+    foreach ($permissions as $permission) {
+        $moduleId = $permission['module_id'];
+        if (!isset($groupedPermissions[$moduleId])) {
+            $groupedPermissions[$moduleId] = [
+                'module_name' => $permission['module_name'],
+                'permissions' => []
+            ];
+        }
+        $groupedPermissions[$moduleId]['permissions'][] = $permission;
+    }
 
     $errorMsg = $_SESSION['errorMsg'] ?? "";
     $successMsg = $_SESSION['successMsg'] ?? "";
@@ -56,16 +73,17 @@ try {
         }
 
         $_SESSION['successMsg'] = "Permissions assigned successfully.";
-        header("Location: assign-permissions.php");
+        header("Location: assign-privilege.php");
         exit;
     }
 
-    $role_permissions = $pdo->query("SELECT r.name as role_name, m.name as module_name, GROUP_CONCAT(p.name SEPARATOR ', ') as permissions
-        FROM role_permissions rp
-        JOIN roles r ON rp.role_id = r.id
-        JOIN modules m ON rp.module_id = m.id
-        JOIN permissions p ON rp.permission_id = p.id
-        GROUP BY rp.role_id, rp.module_id")
+    $role_permissions = $pdo->query("SELECT r.name as role_name, m.name as module_name, GROUP_CONCAT(p.name SEPARATOR ',
+    ') as permissions
+    FROM role_permissions rp
+    JOIN roles r ON rp.role_id = r.id
+    JOIN modules m ON rp.module_id = m.id
+    JOIN permissions p ON rp.permission_id = p.id
+    GROUP BY rp.role_id, rp.module_id")
         ->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     die("Error: " . $e->getMessage());
@@ -74,11 +92,11 @@ try {
 // Fetch the logged-in user's departments from the user_departments table
 $user_id = $_SESSION['user_id'];
 $stmt = $pdo->prepare("
-    SELECT d.name 
+    SELECT d.name
     FROM user_departments ud
     JOIN departments d ON ud.department_id = d.id
     WHERE ud.user_id = :user_id
-");
+    ");
 $stmt->bindParam(':user_id', $user_id);
 $stmt->execute();
 $user_departments = $stmt->fetchAll(PDO::FETCH_COLUMN);
@@ -320,6 +338,26 @@ function formatPermissionName($permissionName)
         .user-info p {
             color: black;
         }
+
+        .module-group {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+
+        .module-group h4 {
+            margin-bottom: 10px;
+            color: #1d3557;
+            font-size: 1.2rem;
+        }
+
+        .permissions-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
     </style>
 </head>
 
@@ -332,11 +370,11 @@ function formatPermissionName($permissionName)
             <?php if (hasPermission('read_users', 'Users')): ?>
                 <a href="view-users.php">View Users</a>
             <?php endif; ?>
-            <?php if (hasPermission('read_roles&departments', 'Roles & Departments')): ?>
+            <?php if (hasPermission('read_roles_&_departments', 'Roles & Departments')): ?>
                 <a href="view-roles-departments.php">View Role or Department</a>
             <?php endif; ?>
             <?php if (hasPermission('read_&_write_privileges', 'Privileges')): ?>
-                <a href="assign-permission.php">Assign & View Privileges</a>
+                <a href="assign-privilege.php">Assign & View Privileges</a>
             <?php endif; ?>
         </div>
 
@@ -351,7 +389,8 @@ function formatPermissionName($permissionName)
 
                 <!-- User Info -->
                 <div class="user-info me-3 ms-auto">
-                    <p class="mb-0">Logged in as: <strong><?= htmlspecialchars($_SESSION['username']) ?></strong></p>
+                    <p class="mb-0">Logged in as: <strong><?= htmlspecialchars($_SESSION['username']) ?></strong>
+                    </p>
                     <p class="mb-0">Departments:
                         <strong><?= !empty($user_departments) ? htmlspecialchars(implode(', ', $user_departments)) : 'None' ?></strong>
                     </p>
@@ -379,7 +418,8 @@ function formatPermissionName($permissionName)
                                 <select name="role_id" id="role_id" class="form-select" required>
                                     <option value="">-- Select Role --</option>
                                     <?php foreach ($roles as $role): ?>
-                                        <option value="<?= $role['id'] ?>"> <?= htmlspecialchars($role['name']) ?> </option>
+                                        <option value="<?= $role['id'] ?>"> <?= htmlspecialchars($role['name']) ?>
+                                        </option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
@@ -397,20 +437,25 @@ function formatPermissionName($permissionName)
 
                             <div class="mb-3">
                                 <label class="form-label">Select Permissions</label>
-                                <div>
-                                    <?php foreach ($permissions as $permission): ?>
-                                        <div class="form-check form-check-inline">
-                                            <input class="form-check-input" type="checkbox" name="permissions[]"
-                                                value="<?= $permission['id'] ?>">
-                                            <label class="form-check-label">
-                                                <?= formatPermissionName($permission['name']) ?> </label>
+                                <?php foreach ($groupedPermissions as $moduleId => $moduleData): ?>
+                                    <div class="module-group mb-4">
+                                        <h4><?= htmlspecialchars($moduleData['module_name']) ?></h4>
+                                        <div class="permissions-list">
+                                            <?php foreach ($moduleData['permissions'] as $permission): ?>
+                                                <div class="form-check form-check-inline">
+                                                    <input class="form-check-input" type="checkbox" name="permissions[]"
+                                                        value="<?= $permission['id'] ?>">
+                                                    <label
+                                                        class="form-check-label"><?= formatPermissionName($permission['name']) ?></label>
+                                                </div>
+                                            <?php endforeach; ?>
                                         </div>
-                                    <?php endforeach; ?>
-                                </div>
+                                    </div>
+                                <?php endforeach; ?>
                             </div>
 
-                            <a type="submit" name="assign_permissions" class="back-button">Assign
-                                Permissions</a>
+                            <button type="submit" name="assign_permissions" class="back-button">Assign
+                                Permissions</button>
                         </form>
                     </div>
 
@@ -444,6 +489,74 @@ function formatPermissionName($permissionName)
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Get the role and module select elements
+        const roleSelect = document.getElementById('role_id');
+        const moduleSelect = document.getElementById('module_id');
+
+        // Get all the checkboxes
+        const checkboxes = document.querySelectorAll('.form-check-input');
+
+        // Add event listeners to the role and module select elements
+        roleSelect.addEventListener('change', function () {
+            // Get the selected role ID
+            const roleId = this.value;
+
+            // Clear all checkboxes
+            checkboxes.forEach(function (checkbox) {
+                checkbox.checked = false;
+            });
+
+            // Get the role privileges
+            fetch('get-role-privileges.php?role_id=' + roleId)
+                .then(response => response.json())
+                .then(data => {
+                    // Check the checkboxes based on the role privileges
+                    data.forEach(function (privilege) {
+                        const checkbox = document.querySelector(`input[name="permissions[]"][value="${privilege.permission_id}"]`);
+                        if (checkbox) {
+                            checkbox.checked = true;
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching role privileges:', error);
+                    // Handle the error here
+                    alert('Error fetching role privileges: ' + error.message);
+                });
+        });
+
+        moduleSelect.addEventListener('change', function () {
+            // Get the selected module ID
+            const moduleId = this.value;
+
+            // Get the role ID
+            const roleId = roleSelect.value;
+
+            // Get the role privileges for the selected role and module
+            fetch('get-role-privileges.php?role_id=' + roleId + '&module_id=' + moduleId)
+                .then(response => response.json())
+                .then(data => {
+                    // Clear all checkboxes
+                    checkboxes.forEach(function (checkbox) {
+                        checkbox.checked = false;
+                    });
+
+                    // Check the checkboxes based on the filtered privileges
+                    data.forEach(function (privilege) {
+                        const checkbox = document.querySelector(`input[name="permissions[]"][value="${privilege.permission_id}"]`);
+                        if (checkbox) {
+                            checkbox.checked = true;
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching role privileges:', error);
+                    // Handle the error here
+                    alert('Error fetching role privileges: ' + error.message);
+                });
+        });
+    </script>
 </body>
 
 </html>
