@@ -30,14 +30,14 @@ try {
 
     // Validate status
     $validStatuses = [
-        'Assigned', 
-        'In Progress', 
-        'Hold', 
-        'Cancelled', 
-        'Reinstated', 
-        'Reassigned', 
-        'Completed on Time', 
-        'Delayed Completion', 
+        'Assigned',
+        'In Progress',
+        'Hold',
+        'Cancelled',
+        'Reinstated',
+        'Reassigned',
+        'Completed on Time',
+        'Delayed Completion',
         'Closed'
     ];
 
@@ -54,8 +54,9 @@ try {
             t.task_name, 
             u.username as assigned_to, 
             d.name as department, 
-            DATE_FORMAT(t.expected_finish_date, '%Y-%m-%d') as completion_date,
-            DATE_FORMAT(t.expected_start_date, '%Y-%m-%d') as start_date
+            DATE_FORMAT(t.planned_finish_date, '%Y-%m-%d') as completion_date,
+            DATE_FORMAT(t.planned_start_date, '%Y-%m-%d') as start_date,
+            DATE_FORMAT(t.actual_finish_date, '%Y-%m-%d') as actual_completion_date
         FROM tasks t
         JOIN users u ON t.user_id = u.id
         JOIN user_departments ud ON u.id = ud.user_id
@@ -71,7 +72,8 @@ try {
     }
 
     // Limit to the last 3 months
-    $query .= " AND t.expected_finish_date >= DATE_SUB(NOW(), INTERVAL 3 MONTH) ORDER BY t.expected_finish_date DESC";
+    $query .= " AND t.planned_finish_date >= DATE_SUB(NOW(), INTERVAL 3 MONTH) 
+           ORDER BY COALESCE(t.actual_finish_date, t.planned_finish_date) DESC";
 
     $stmt = $pdo->prepare($query);
     $stmt->bindParam(':status', $status, PDO::PARAM_STR);

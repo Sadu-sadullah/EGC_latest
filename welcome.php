@@ -1142,7 +1142,8 @@ try {
             });
 
             function fetchTaskData(status) {
-                fetch(`fetch-tasks.php?status=${status}`)
+                const encodedStatus = encodeURIComponent(status);
+                fetch(`fetch-tasks.php?status=${encodedStatus}`)
                     .then(response => {
                         if (!response.ok) {
                             throw new Error(`HTTP error! Status: ${response.status}`);
@@ -1214,15 +1215,24 @@ try {
                 } else {
                     data.forEach((task, index) => {
                         const row = document.createElement('tr');
+                        let displayDate;
+
+                        if ((status === 'Delayed Completion' || status === 'Completed on Time') && task.actual_completion_date) {
+                            displayDate = task.actual_completion_date;
+                        } else {
+                            displayDate = task.completion_date || task.start_date || task.planned_finish_date;
+                        }
+
                         row.innerHTML = `
-                <td>${index + 1}</td>
-                <td>${task.task_name}</td>
-                <td>${task.assigned_to}</td>
-                <td>${task.department}</td>
-                <td>${task.completion_date || task.start_date || task.planned_finish_date}</td>
-            `;
+                            <td>${index + 1}</td>
+                            <td>${task.task_name}</td>
+                            <td>${task.assigned_to}</td>
+                            <td>${task.department}</td>
+                            <td>${displayDate}</td>
+                        `;
                         tableBody.appendChild(row);
                     });
+
                 }
 
                 // Show the modal
