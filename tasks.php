@@ -1377,20 +1377,32 @@ function getWeekdayHours($start, $end)
 
                                                     if ($plannedStartDate && $plannedFinishDate && $actualStartDate && $actualFinishDate) {
                                                         // Calculate planned duration (in seconds)
-                                                        $plannedDuration = $plannedFinishDate - $plannedStartDate;
-
+                                                        $plannedStartDate = strtotime($row['planned_start_date']);
+                                                        $plannedFinishDate = strtotime($row['planned_finish_date']);
+                                                        if ($plannedFinishDate < $plannedStartDate) {
+                                                            $plannedFinishDate += 86400; // Add 24 hours if crossing midnight
+                                                        }
+                                                        $plannedDuration = 3600; // Fixed 1 hour duration
+                                        
                                                         // Calculate actual duration (in seconds)
+                                                        $actualStartDate = strtotime($row['actual_start_date']);
+                                                        $actualFinishDate = strtotime($row['task_actual_finish_date']);
                                                         $actualDuration = $actualFinishDate - $actualStartDate;
 
-                                                        // Calculate delay (in seconds)
                                                         $delaySeconds = $actualDuration - $plannedDuration;
 
-                                                        // Convert delay into days and hours
-                                                        $delayDays = floor($delaySeconds / (60 * 60 * 24)); // Total days
-                                                        $delayHours = floor(($delaySeconds % (60 * 60 * 24)) / (60 * 60)); // Remaining hours
-                                        
+                                                        // Convert excess duration into days and hours
+                                                        $delayDays = floor($delaySeconds / (60 * 60 * 24));
+                                                        $delayHours = floor(($delaySeconds % (60 * 60 * 24)) / (60 * 60));
+
+                                                        $delayText = "";
+                                                        if ($delayDays > 0) {
+                                                            $delayText .= $delayDays . " days, ";
+                                                        }
+                                                        $delayText .= $delayHours . " hours delayed";
+
                                                         // Display the delay duration
-                                                        echo "<br><small class='text-danger'>{$delayDays} days, {$delayHours} hours delayed</small>";
+                                                        echo "<br><small class='text-danger'>{$delayText}</small>";
                                                     }
                                                     ?>
                                                 <?php endif; ?>
