@@ -104,10 +104,12 @@ $user_departments = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
 function formatPermissionName($permissionName)
 {
+    // Split permission name by underscore into array of words
     $words = explode('_', $permissionName);
+    // Capitalize first letter of each word using ucwords()
     $formattedWords = array_map('ucwords', $words);
-    return implode(' ', $formattedWords);
-}
+    // Join words back together with spaces between them
+    return implode(' ', $formattedWords);}
 ?>
 
 <!DOCTYPE html>
@@ -475,7 +477,7 @@ function formatPermissionName($permissionName)
                                     <tr>
                                         <td><?= htmlspecialchars($rp['role_name']) ?></td>
                                         <td><?= htmlspecialchars($rp['module_name']) ?></td>
-                                        <td><?= htmlspecialchars($rp['permissions']) ?></td>
+                                        <td><?= htmlspecialchars(formatPermissionName($rp['permissions'])) ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
