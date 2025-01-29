@@ -60,7 +60,7 @@ $config = include '../config.php';
 $dbHost = 'localhost';
 $dbUsername = $config['dbUsername'];
 $dbPassword = $config['dbPassword'];
-$dbName = 'euro_login_system_2';
+$dbName = 'euro_login_system';
 
 $conn = new mysqli($dbHost, $dbUsername, $dbPassword, $dbName);
 
@@ -106,8 +106,8 @@ if ($userResult->num_rows > 0) {
 
 // Fetch users for task assignment (assign_tasks privilege & Tasks module)
 $users = [];
-if (hasPermission('assign_tasks', 'Tasks')) {
-    if (hasPermission('assign_to_any_user_tasks', 'Tasks')) {
+if (hasPermission('assign_tasks')) {
+    if (hasPermission('assign_to_any_user_tasks')) {
         // assign_to_any_user_tasks privilege can assign tasks to users and managers
         $userQuery = "
             SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role 
@@ -133,7 +133,7 @@ if (hasPermission('assign_tasks', 'Tasks')) {
     }
 
     $stmt = $conn->prepare($userQuery);
-    if (!hasPermission('assign_to_any_user_tasks', 'Tasks')) {
+    if (!hasPermission('assign_to_any_user_tasks')) {
         $stmt->bind_param("i", $user_id);
     }
     $stmt->execute();
@@ -259,7 +259,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
     }
 }
 
-if (hasPermission('view_all_tasks', 'Tasks')) {
+if (hasPermission('view_all_tasks')) {
     // Admin-like query: Fetch all tasks
     $taskQuery = "
         SELECT 
@@ -300,7 +300,7 @@ if (hasPermission('view_all_tasks', 'Tasks')) {
             END DESC, 
             tasks.recorded_timestamp DESC
     ";
-} elseif (hasPermission('view_department_tasks', 'Tasks')) {
+} elseif (hasPermission('view_department_tasks')) {
     //Fetch tasks for users in the same department
     $taskQuery = "
         SELECT 
@@ -342,7 +342,7 @@ if (hasPermission('view_all_tasks', 'Tasks')) {
             END DESC, 
             tasks.recorded_timestamp DESC
     ";
-} elseif (hasPermission('view_own_tasks', 'Tasks')) {
+} elseif (hasPermission('view_own_tasks')) {
     //Fetch only tasks assigned to the current user
     $taskQuery = "
         SELECT 
@@ -387,7 +387,7 @@ if (hasPermission('view_all_tasks', 'Tasks')) {
 // Fetch all tasks based on privilege
 $stmt = $conn->prepare($taskQuery);
 
-if (hasPermission('view_department_tasks', 'Tasks') || hasPermission('view_own_tasks', 'Tasks')) {
+if (hasPermission('view_department_tasks') || hasPermission('view_own_tasks')) {
     // Bind the user ID for Manager and User queries
     $stmt->bind_param("i", $user_id);
 }
@@ -984,13 +984,13 @@ function getWeekdayHours($start, $end)
             <div class="sidebar">
                 <h3>Menu</h3>
                 <a href="tasks.php">Tasks</a>
-                <?php if (hasPermission('read_users', 'Users')): ?>
+                <?php if (hasPermission('read_users')): ?>
                     <a href="view-users.php">View Users</a>
                 <?php endif; ?>
-                <?php if (hasPermission('read_roles_&_departments', 'Roles & Departments')): ?>
+                <?php if (hasPermission('read_roles_&_departments')): ?>
                     <a href="view-roles-departments.php">View Role or Department</a>
                 <?php endif; ?>
-                <?php if (hasPermission('read_&_write_privileges', 'Privileges')): ?>
+                <?php if (hasPermission('read_&_write_privileges')): ?>
                     <a href="assign-privilege.php">Assign & View Privileges</a>
                 <?php endif; ?>
             </div>
@@ -1023,14 +1023,14 @@ function getWeekdayHours($start, $end)
                         <!-- Filter Container -->
                         <div class="filter-container">
                             <div class="filter-buttons">
-                                <?php if (hasPermission('create_tasks', 'Tasks')): ?>
+                                <?php if (hasPermission('create_tasks')): ?>
                                     <button type="button" class="btn btn-primary" data-bs-toggle="modal"
                                         data-bs-target="#taskManagementModal">
                                         Create New Task
                                     </button>
                                 <?php endif; ?>
                                 <button onclick="resetFilters()" class="btn btn-primary">Reset</button>
-                                <?php if (hasPermission('export_tasks', 'Tasks')): ?>
+                                <?php if (hasPermission('export_tasks')): ?>
                                     <a href="export_tasks.php" class="btn btn-success">Export to CSV</a>
                                 <?php endif; ?>
                             </div>
@@ -1051,7 +1051,7 @@ function getWeekdayHours($start, $end)
                                     </select>
                                 </div>
 
-                                <?php if (hasPermission('filter_tasks', 'Tasks') || $hasMultipleDepartments): ?>
+                                <?php if (hasPermission('filter_tasks') || $hasMultipleDepartments): ?>
                                     <!-- Multi-select dropdown for filtering by department -->
                                     <div class="filter-dropdown">
                                         <label for="department-filter">Filter by Department of Assigned User:</label>
@@ -1112,11 +1112,11 @@ function getWeekdayHours($start, $end)
                                     <th>Status</th>
                                     <th>Project Type</th>
                                     <th>Assigned By</th>
-                                    <?php if (hasPermission('assign_tasks', 'Tasks')): ?>
+                                    <?php if (hasPermission('assign_tasks')): ?>
                                         <th>Assigned To</th>
                                     <?php endif; ?>
                                     <th>Created On</th>
-                                    <?php if (hasPermission('assign_tasks', 'Tasks')): ?>
+                                    <?php if (hasPermission('assign_tasks')): ?>
                                         <th>Actions</th>
                                     <?php endif; ?>
                                 </tr>
@@ -1181,14 +1181,14 @@ function getWeekdayHours($start, $end)
                                                 $statuses = [];
 
                                                 // Logic for status_change_main privilege or the user who assigned the task
-                                                if (hasPermission('status_change_main', 'Tasks') || $assigned_by_id == $user_id) {
+                                                if (hasPermission('status_change_main') || $assigned_by_id == $user_id) {
                                                     // status_change_main privilege or the user who assigned the task can change status to anything except "In Progress", "Completed on Time", and "Delayed Completion"
                                                     if (in_array($currentStatus, ['Assigned', 'In Progress', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'])) {
                                                         $statuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
                                                     }
                                                 }
                                                 // Logic for Regular User (assigned user)
-                                                elseif (hasPermission('status_change_normal', 'Tasks') && $user_id == $assigned_user_id) {
+                                                elseif (hasPermission('status_change_normal') && $user_id == $assigned_user_id) {
                                                     // Regular user can only change status if they are the assigned user
                                                     if ($currentStatus === 'Assigned') {
                                                         // If the task is "Assigned", the next viable options are "In Progress"
@@ -1229,7 +1229,7 @@ function getWeekdayHours($start, $end)
                                         <td><?= htmlspecialchars($row['assigned_by']) ?>
                                             (<?= htmlspecialchars($row['assigned_by_department']) ?>)
                                         </td>
-                                        <?php if (hasPermission('assign_tasks', 'Tasks')): ?>
+                                        <?php if (hasPermission('assign_tasks')): ?>
                                             <td><?= htmlspecialchars($row['assigned_to']) ?>
                                                 (<?= htmlspecialchars($row['assigned_to_department']) ?>)
                                             </td>
@@ -1237,7 +1237,7 @@ function getWeekdayHours($start, $end)
                                         <td data-utc="<?= htmlspecialchars($row['recorded_timestamp']) ?>">
                                             <?= htmlspecialchars(date("d M Y, h:i A", strtotime($row['recorded_timestamp']))) ?>
                                         </td>
-                                        <?php if ((hasPermission('update_tasks', 'Tasks') && $row['assigned_by_id'] == $_SESSION['user_id']) || hasPermission('upate_tasks_all', 'Tasks')): ?>
+                                        <?php if ((hasPermission('update_tasks') && $row['assigned_by_id'] == $_SESSION['user_id']) || hasPermission('upate_tasks_all')): ?>
                                             <td>
                                                 <a href="edit-tasks.php?id=<?= $row['task_id'] ?>" class="edit-button">Edit</a>
                                                 <button type="button" class="btn btn-danger" data-bs-toggle="modal"
@@ -1309,7 +1309,7 @@ function getWeekdayHours($start, $end)
                                     <th>Status</th>
                                     <th>Project Type</th>
                                     <th>Assigned By</th>
-                                    <?php if (hasPermission('assign_tasks', 'Tasks')): ?>
+                                    <?php if (hasPermission('assign_tasks')): ?>
                                         <th>Assigned To</th>
                                     <?php endif; ?>
                                     <th>Created On</th>
@@ -1383,7 +1383,7 @@ function getWeekdayHours($start, $end)
 
                                                 // Define the available statuses based on the user role and current status
                                                 $statuses = [];
-                                                if (hasPermission('status_change_main', 'Tasks') || $assigned_by_id == $user_id) {
+                                                if (hasPermission('status_change_main') || $assigned_by_id == $user_id) {
                                                     // Admin or the user who assigned the task can change status to "Closed"
                                                     if (in_array($currentStatus, ['Completed on Time', 'Delayed Completion'])) {
                                                         $statuses = ['Closed'];
@@ -1455,7 +1455,7 @@ function getWeekdayHours($start, $end)
                                         <td><?= htmlspecialchars($row['assigned_by']) ?>
                                             (<?= htmlspecialchars($row['assigned_by_department']) ?>)
                                         </td>
-                                        <?php if (hasPermission('assign_tasks', 'Tasks')): ?>
+                                        <?php if (hasPermission('assign_tasks')): ?>
                                             <td><?= htmlspecialchars($row['assigned_to']) ?>
                                                 (<?= htmlspecialchars($row['assigned_to_department']) ?>)
                                             </td>

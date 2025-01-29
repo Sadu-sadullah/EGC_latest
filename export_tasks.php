@@ -3,6 +3,8 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
+require 'permissions.php';
+
 session_start();
 
 // Check if the user is logged in
@@ -16,7 +18,7 @@ $config = include '../config.php';
 $dbHost = 'localhost';
 $dbUsername = $config['dbUsername'];
 $dbPassword = $config['dbPassword'];
-$dbName = 'euro_login_system_2';
+$dbName = 'euro_login_system';
 
 $conn = new mysqli($dbHost, $dbUsername, $dbPassword, $dbName);
 
@@ -28,7 +30,7 @@ if ($conn->connect_error) {
 $user_id = $_SESSION['user_id'];
 $user_role = $_SESSION['role'];
 
-$taskQuery = $user_role === 'Admin'
+$taskQuery = hasPermission('view_all_tasks')
     ? "
         SELECT 
             tasks.task_id,
@@ -68,7 +70,7 @@ $taskQuery = $user_role === 'Admin'
             END DESC, 
             tasks.recorded_timestamp DESC
     "
-    : ($user_role === 'Manager'
+    : (hasPermission('view_department_tasks')
         ? "
             SELECT 
                 tasks.task_id,
@@ -146,7 +148,7 @@ $taskQuery = $user_role === 'Admin'
         ");
 
 $stmt = $conn->prepare($taskQuery);
-if ($user_role === 'Manager' || $user_role === 'User') {
+if (hasPermission('view_department_tasks')||hasPermission('view_department_tasks')) {
     $stmt->bind_param("i", $user_id);
 }
 
@@ -180,7 +182,7 @@ $headers = [
 ];
 
 // Add "Assigned To" and "Assigned To Department" only for Admin and Manager roles
-if ($user_role === 'Admin' || $user_role === 'Manager') {
+if (hasPermission('view_all_tasks')||hasPermission('view_department_tasks')) {
     array_splice($headers, 11, 0, ['Assigned To', 'Assigned To Department']);
 }
 
@@ -209,7 +211,7 @@ while ($row = $result->fetch_assoc()) {
         ];
 
         // Add "Assigned To" and "Assigned To Department" only for Admin and Manager roles
-        if ($user_role === 'Admin' || $user_role === 'Manager') {
+        if (hasPermission('view_all_tasks')||hasPermission('view_department_tasks')) {
             array_splice($rowData, 11, 0, [
                 $row['assigned_to'] ?? '', // Handle cases where assigned_to is not available
                 $row['assigned_to_department'] ?? ''  // Handle cases where assigned_to_department is not available
@@ -251,7 +253,7 @@ while ($row = $result->fetch_assoc()) {
         ];
 
         // Add "Assigned To" and "Assigned To Department" only for Admin and Manager roles
-        if ($user_role === 'Admin' || $user_role === 'Manager') {
+        if (hasPermission('view_all_tasks')||hasPermission('view_department_tasks')) {
             array_splice($rowData, 11, 0, [
                 $row['assigned_to'] ?? '', // Handle cases where assigned_to is not available
                 $row['assigned_to_department'] ?? ''  // Handle cases where assigned_to_department is not available

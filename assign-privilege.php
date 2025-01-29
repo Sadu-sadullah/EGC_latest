@@ -23,7 +23,7 @@ if (
 $_SESSION['last_activity'] = time();
 
 $config = include '../config.php';
-$dsn = "mysql:host=localhost;dbname=euro_login_system_2;charset=utf8mb4";
+$dsn = "mysql:host=localhost;dbname=euro_login_system;charset=utf8mb4";
 $username = $config['dbUsername'];
 $password = $config['dbPassword'];
 
@@ -61,33 +61,36 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['assign_permissions'])) {
         $role_id = $_POST['role_id'];
-        $module_id = $_POST['module_id'];
-        $permission_ids = $_POST['permissions'] ?? [];
+        $permissions = $_POST['permissions'] ?? [];
 
-        // Add validation check
         if (empty($role_id)) {
             $_SESSION['errorMsg'] = "Please select a Role to assign or revoke privileges.";
             header("Location: assign-privilege.php");
             exit;
         }
 
-        // Delete existing permissions for the role and module
-        $pdo->prepare("DELETE FROM role_permissions WHERE role_id = ? AND module_id = ?")
-            ->execute([$role_id, $module_id]);
+        // Begin transaction
+        $pdo->beginTransaction();
+        try {
+            // Delete all existing permissions for the role
+            $stmt = $pdo->prepare("DELETE FROM role_permissions WHERE role_id = ?");
+            $stmt->execute([$role_id]);
 
-        // Insert new permissions for the role and module
-        foreach ($permission_ids as $permission_id) {
-            $pdo->prepare("INSERT IGNORE INTO role_permissions (role_id, permission_id, module_id) VALUES (?, ?, ?)")
-                ->execute([$role_id, $permission_id, $module_id]);
+            // Insert new permissions for each module
+            foreach ($permissions as $module_id => $module_permissions) {
+                foreach ($module_permissions as $permission_id) {
+                    $stmt = $pdo->prepare("INSERT INTO role_permissions (role_id, permission_id, module_id) VALUES (?, ?, ?)");
+                    $stmt->execute([$role_id, $permission_id, $module_id]);
+                }
+            }
+
+            $pdo->commit();
+            $_SESSION['successMsg'] = "Privileges updated successfully.";
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            $_SESSION['errorMsg'] = "Error updating privileges: " . $e->getMessage();
         }
 
-        // If no permissions were selected, delete all permissions for the role and module
-        if (empty($permission_ids)) {
-            $pdo->prepare("DELETE FROM role_permissions WHERE role_id = ? AND module_id = ?")
-                ->execute([$role_id, $module_id]);
-        }
-
-        $_SESSION['successMsg'] = "Privileges updated successfully.";
         header("Location: assign-privilege.php");
         exit;
     }
@@ -385,13 +388,13 @@ function formatPermissionName($permissionName)
         <div class="sidebar">
             <h3>Menu</h3>
             <a href="tasks.php">Tasks</a>
-            <?php if (hasPermission('read_users', 'Users')): ?>
+            <?php if (hasPermission('read_users')): ?>
                 <a href="view-users.php">View Users</a>
             <?php endif; ?>
-            <?php if (hasPermission('read_roles_&_departments', 'Roles & Departments')): ?>
+            <?php if (hasPermission('read_roles_&_departments')): ?>
                 <a href="view-roles-departments.php">View Role or Department</a>
             <?php endif; ?>
-            <?php if (hasPermission('read_&_write_privileges', 'Privileges')): ?>
+            <?php if (hasPermission('read_&_write_privileges')): ?>
                 <a href="assign-privilege.php">Assign & View Privileges</a>
             <?php endif; ?>
         </div>
@@ -443,28 +446,25 @@ function formatPermissionName($permissionName)
                             </div>
 
                             <div class="mb-3">
-                                <label for="module_id" class="form-label">Select Module</label>
-                                <select name="module_id" id="module_id" class="form-select" required>
-                                    <option value="">-- Select Module --</option>
-                                    <?php foreach ($modules as $module): ?>
-                                        <option value="<?= $module['id'] ?>"> <?= htmlspecialchars($module['name']) ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-
-                            <div class="mb-3">
-                                <label class="form-label">Select Previleges</label>
-                                <?php foreach ($groupedPermissions as $moduleId => $moduleData): ?>
-                                    <div class="module-group mb-4">
-                                        <h4><?= htmlspecialchars($moduleData['module_name']) ?></h4>
+                                <label class="form-label">Module Privileges</label>
+                                <?php foreach ($modules as $module): ?>
+                                    <div class="module-group mb-4" id="module-<?= $module['id'] ?>">
+                                        <h4><?= htmlspecialchars($module['name']) ?></h4>
+                                        <input type="hidden" name="module_ids[]" value="<?= $module['id'] ?>">
                                         <div class="permissions-list">
-                                            <?php foreach ($moduleData['permissions'] as $permission): ?>
+                                            <?php
+                                            // Filter permissions for this module
+                                            $modulePermissions = array_filter($permissions, function ($p) use ($module) {
+                                                return $p['module_id'] == $module['id'];
+                                            });
+                                            foreach ($modulePermissions as $permission): ?>
                                                 <div class="form-check form-check-inline">
-                                                    <input class="form-check-input" type="checkbox" name="permissions[]"
-                                                        value="<?= $permission['id'] ?>" data-module-id="<?= $moduleId ?>">
-                                                    <label
-                                                        class="form-check-label"><?= formatPermissionName($permission['name']) ?></label>
+                                                    <input class="form-check-input" type="checkbox"
+                                                        name="permissions[<?= $module['id'] ?>][]"
+                                                        value="<?= $permission['id'] ?>" data-module-id="<?= $module['id'] ?>">
+                                                    <label class="form-check-label">
+                                                        <?= formatPermissionName($permission['name']) ?>
+                                                    </label>
                                                 </div>
                                             <?php endforeach; ?>
                                         </div>
@@ -473,7 +473,7 @@ function formatPermissionName($permissionName)
                             </div>
 
                             <button type="submit" name="assign_permissions" class="back-button">Assign
-                                Permissions</button>
+                                Privileges</button>
                         </form>
                     </div>
 
@@ -508,71 +508,39 @@ function formatPermissionName($permissionName)
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Get the role and module select elements
-        const roleSelect = document.getElementById('role_id');
-        const moduleSelect = document.getElementById('module_id');
+        document.addEventListener('DOMContentLoaded', function () {
+            const roleSelect = document.getElementById('role_id');
 
-        // Get all the checkboxes
-        const checkboxes = document.querySelectorAll('.form-check-input');
+            roleSelect.addEventListener('change', function () {
+                const roleId = this.value;
+                const checkboxes = document.querySelectorAll('.form-check-input');
 
-        // Add event listeners to the role and module select elements
-        roleSelect.addEventListener('change', function () {
-            // Get the selected role ID
-            const roleId = this.value;
+                // Clear all checkboxes
+                checkboxes.forEach(function (checkbox) {
+                    checkbox.checked = false;
+                });
 
-            // Clear all checkboxes
-            checkboxes.forEach(function (checkbox) {
-                checkbox.checked = false;
+                if (roleId) {
+                    // Fetch and set permissions for the selected role
+                    fetch('get-role-privileges.php?role_id=' + roleId)
+                        .then(function (response) {
+                            return response.json();
+                        })
+                        .then(function (data) {
+                            data.forEach(function (privilege) {
+                                const checkbox = document.querySelector(
+                                    `input[name="permissions[${privilege.module_id}][]"][value="${privilege.permission_id}"]`
+                                );
+                                if (checkbox) {
+                                    checkbox.checked = true;
+                                }
+                            });
+                        })
+                        .catch(function (error) {
+                            console.error('Error fetching role privileges:', error);
+                        });
+                }
             });
-
-            // Get the role privileges
-            fetch('get-role-privileges.php?role_id=' + roleId)
-                .then(response => response.json())
-                .then(data => {
-                    // Check the checkboxes based on the role privileges
-                    data.forEach(function (privilege) {
-                        const checkbox = document.querySelector(`input[name="permissions[]"][value="${privilege.permission_id}"]`);
-                        if (checkbox) {
-                            checkbox.checked = true;
-                        }
-                    });
-                })
-                .catch(error => {
-                    console.error('Error fetching role privileges:', error);
-                    // Handle the error here
-                    alert('Error fetching role privileges: ' + error.message);
-                });
-        });
-
-        moduleSelect.addEventListener('change', function () {
-            // Get the selected module ID
-            const moduleId = this.value;
-
-            // Get the role ID
-            const roleId = roleSelect.value;
-
-            // Get the role privileges for the selected role and module
-            fetch('get-role-privileges.php?role_id=' + roleId + '&module_id=' + moduleId)
-                .then(response => response.json())
-                .then(data => {
-                    // Clear all checkboxes
-                    checkboxes.forEach(function (checkbox) {
-                        checkbox.checked = false;
-                    });
-
-                    // Check the checkboxes based on the filtered privileges
-                    data.forEach(function (privilege) {
-                        const checkbox = document.querySelector(`input[name="permissions[]"][value="${privilege.permission_id}"][data-module-id="${moduleId}"]`);
-                        if (checkbox) {
-                            checkbox.checked = true;
-                        }
-                    });
-                })
-                .catch(error => {
-                    console.error('Error fetching role privileges:', error);
-                    // Handle the error here
-                    alert('Error fetching role privileges: ' + error.message);
-                });
         });
     </script>
 </body>

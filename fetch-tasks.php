@@ -5,6 +5,8 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
+require 'permissions.php';
+
 session_start();
 
 // Check if the user is logged in
@@ -16,7 +18,7 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
 
 // Database connection
 $config = include '../config.php';
-$dsn = "mysql:host=localhost;dbname=euro_login_system_2;charset=utf8mb4";
+$dsn = "mysql:host=localhost;dbname=euro_login_system;charset=utf8mb4";
 $username = $config['dbUsername'];
 $password = $config['dbPassword'];
 
@@ -65,9 +67,9 @@ try {
     ";
 
     // Add role-specific filters
-    if ($userRole === 'Manager') {
+    if (hasPermission('view_department_tasks')) {
         $query .= " AND ud.department_id IN (SELECT department_id FROM user_departments WHERE user_id = :user_id)";
-    } elseif ($userRole === 'User') {
+    } elseif (hasPermission('view_own_tasks')) {
         $query .= " AND t.user_id = :user_id";
     }
 

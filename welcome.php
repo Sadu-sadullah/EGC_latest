@@ -21,7 +21,7 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
 
 // Database connection
 $config = include '../config.php';
-$dsn = "mysql:host=localhost;dbname=euro_login_system_2;charset=utf8mb4";
+$dsn = "mysql:host=localhost;dbname=euro_login_system;charset=utf8mb4";
 $username = $config['dbUsername'];
 $password = $config['dbPassword'];
 
@@ -78,7 +78,7 @@ try {
     }
 
     // Fetch total tasks
-    if (hasPermission('view_all_tasks', 'Tasks')) {
+    if (hasPermission('view_all_tasks')) {
         $stmt = $pdo->prepare("SELECT COUNT(*) as total_tasks FROM tasks");
         $stmt->execute();
         $totalTasks = $stmt->fetch(PDO::FETCH_ASSOC)['total_tasks'];
@@ -180,7 +180,7 @@ try {
 
     }
 
-    if (hasPermission('view_department_tasks', 'Tasks')) {
+    if (hasPermission('view_department_tasks')) {
         // For manager
         // Fetch total tasks for manager's departments
         $stmt = $pdo->prepare("SELECT COUNT(*) as total_tasks 
@@ -353,7 +353,7 @@ try {
     }
 
     // For User
-    if (hasPermission('view_own_tasks', 'Tasks')) {
+    if (hasPermission('view_own_tasks')) {
         // Fetch total tasks for the user
         $stmt = $pdo->prepare("SELECT COUNT(*) as total_tasks FROM tasks WHERE user_id = :user_id");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
@@ -611,13 +611,13 @@ try {
         <div class="sidebar">
             <h3>Menu</h3>
             <a href="tasks.php">Tasks</a>
-            <?php if (hasPermission('read_users', 'Users')): ?>
+            <?php if (hasPermission('read_users')): ?>
                 <a href="view-users.php">View Users</a>
             <?php endif; ?>
-            <?php if (hasPermission('read_roles_&_departments', 'Roles & Departments')): ?>
+            <?php if (hasPermission('read_roles_&_departments')): ?>
                 <a href="view-roles-departments.php">View Role or Department</a>
             <?php endif; ?>
-            <?php if (hasPermission('read_&_write_privileges', 'Privileges')): ?>
+            <?php if (hasPermission('read_&_write_privileges')): ?>
                 <a href="assign-privilege.php">Assign & View Privileges</a>
             <?php endif; ?>
         </div>
@@ -733,12 +733,12 @@ try {
                     </div>
 
                     <!-- Tasks by Department (Only for Admin and Manager) -->
-                    <?php if (hasPermission('dashboard_tasks', 'Dashboard')): ?>
+                    <?php if (hasPermission('dashboard_tasks')): ?>
                         <div class="col-md-4">
                             <div class="card h-100">
                                 <div class="card-body">
                                     <h5 class="card-title">
-                                        <?= (hasPermission('dashboard_tasks_department', 'Dashboard')) ? 'Tasks in My Departments' : 'Tasks by Department' ?>
+                                        <?= (hasPermission('dashboard_tasks_department')) ? 'Tasks in My Departments' : 'Tasks by Department' ?>
                                     </h5>
                                     <div class="text-center">
                                         <canvas id="tasksByDepartmentChart"></canvas>
@@ -749,12 +749,12 @@ try {
                     <?php endif; ?>
 
                     <!-- User Performance (Only for Admin and Manager) -->
-                    <?php if (hasPermission('dashboard_tasks', 'Dashboard')): ?>
+                    <?php if (hasPermission('dashboard_tasks')): ?>
                         <div class="col-md-4">
                             <div class="card h-100">
                                 <div class="card-body">
                                     <h5 class="card-title">
-                                        <?= (hasPermission('dashboard_tasks_department', 'Dashboard')) ? 'Top Performers in My Departments' : 'Top Performers' ?>
+                                        <?= (hasPermission('dashboard_tasks_department')) ? 'Top Performers in My Departments' : 'Top Performers' ?>
                                     </h5>
                                     <ul class="list-group list-group-flush">
                                         <?php foreach ($topPerformers as $performer): ?>
@@ -1298,7 +1298,7 @@ try {
                 }
             });
 
-            <?php if (hasPermission('dashboard_tasks', 'Dashboard')): ?>
+            <?php if (hasPermission('dashboard_tasks')): ?>
                 // Tasks by Department (Bar Chart)
                 const tasksByDepartmentChart = new Chart(document.getElementById('tasksByDepartmentChart'), {
                     type: 'bar',

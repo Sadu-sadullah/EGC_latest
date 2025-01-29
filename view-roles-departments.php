@@ -27,7 +27,7 @@ if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) >
 $_SESSION['last_activity'] = time();
 
 $config = include '../config.php';
-$dsn = "mysql:host=localhost;dbname=euro_login_system_2;charset=utf8mb4";
+$dsn = "mysql:host=localhost;dbname=euro_login_system;charset=utf8mb4";
 $username = $config['dbUsername'];
 $password = $config['dbPassword'];
 
@@ -369,13 +369,13 @@ try {
         <div class="sidebar">
             <h3>Menu</h3>
             <a href="tasks.php">Tasks</a>
-            <?php if (hasPermission('read_users', 'Users')): ?>
+            <?php if (hasPermission('read_users')): ?>
                 <a href="view-users.php">View Users</a>
             <?php endif; ?>
-            <?php if (hasPermission('read_roles_&_departments', 'Roles & Departments')): ?>
+            <?php if (hasPermission('read_roles_&_departments')): ?>
                 <a href="view-roles-departments.php">View Role or Department</a>
             <?php endif; ?>
-            <?php if (hasPermission('read_&_write_privileges', 'Privileges')): ?>
+            <?php if (hasPermission('read_&_write_privileges')): ?>
                 <a href="assign-privilege.php">Assign & View Privileges</a>
             <?php endif; ?>
         </div>

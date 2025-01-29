@@ -4,7 +4,7 @@ $config = require '../config.php';
 
 // Database connection details
 $dbHost = 'localhost'; // Database host
-$dbName = 'euro_login_system_2'; // Database name
+$dbName = 'euro_login_system'; // Database name
 $dbUsername = $config['dbUsername']; // Database username from config
 $dbPassword = $config['dbPassword']; // Database password from config
 
@@ -17,7 +17,7 @@ if ($conn->connect_error) {
 }
 
 // Function to check if a user has a specific permission for a specific module
-function hasPermission($permission, $module)
+function hasPermission($permission)
 {
     global $conn;
 
@@ -44,15 +44,14 @@ function hasPermission($permission, $module)
     $sql = "SELECT COUNT(*) 
             FROM role_permissions rp
             JOIN permissions p ON rp.permission_id = p.id
-            JOIN modules m ON rp.module_id = m.id
-            WHERE rp.role_id = ? AND p.name = ? AND m.name = ?";
+            WHERE rp.role_id = ? AND p.name = ?";
 
     // Prepare and execute the query
     $stmt = $conn->prepare($sql);
     if (!$stmt) {
         die("Error preparing statement: " . $conn->error);
     }
-    $stmt->bind_param("iss", $roleId, $permission, $module);
+    $stmt->bind_param("is", $roleId, $permission);
     $stmt->execute();
     $stmt->bind_result($count);
     $stmt->fetch();

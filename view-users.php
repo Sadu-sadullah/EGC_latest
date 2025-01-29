@@ -8,7 +8,7 @@ error_reporting(E_ALL);
 
 session_start();
 $config = include '../config.php';
-$dsn = "mysql:host=localhost;dbname=euro_login_system_2;charset=utf8mb4";
+$dsn = "mysql:host=localhost;dbname=euro_login_system;charset=utf8mb4";
 $username = $config['dbUsername'];
 $password = $config['dbPassword'];
 
@@ -54,7 +54,7 @@ try {
     $pdo = new PDO($dsn, $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    if (hasPermission('read_all_users', 'Users')) {
+    if (hasPermission('read_all_users')) {
         // Admin: View all users except Admins
         $stmt = $pdo->prepare("
             SELECT u.id, u.username, u.email, r.name AS role_name, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments
@@ -67,7 +67,7 @@ try {
             ORDER BY u.username
         ");
         $stmt->execute();
-    } elseif (hasPermission('read_department_users', 'Users')) {
+    } elseif (hasPermission('read_department_users')) {
         // Manager: View only users in the same department(s), excluding Admins and their own account
         $departmentPlaceholders = implode(',', array_fill(0, count($user_departments), '?'));
         $stmt = $pdo->prepare("
@@ -474,13 +474,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="sidebar">
             <h3>Menu</h3>
             <a href="tasks.php">Tasks</a>
-            <?php if (hasPermission('read_users', 'Users')): ?>
+            <?php if (hasPermission('read_users')): ?>
                 <a href="view-users.php">View Users</a>
             <?php endif; ?>
-            <?php if (hasPermission('read_roles_&_departments', 'Roles & Departments')): ?>
+            <?php if (hasPermission('read_roles_&_departments')): ?>
                 <a href="view-roles-departments.php">View Role or Department</a>
             <?php endif; ?>
-            <?php if (hasPermission('read_&_write_privileges', 'Privileges')): ?>
+            <?php if (hasPermission('read_&_write_privileges')): ?>
                 <a href="assign-privilege.php">Assign & View Privileges</a>
             <?php endif; ?>
         </div>
@@ -523,7 +523,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php unset($_SESSION['deletionMsg']); ?>
                     <?php endif; ?>
 
-                    <?php if (hasPermission('read_all_users', 'Users')): ?>
+                    <?php if (hasPermission('read_all_users')): ?>
                         <p>Viewing all users</p>
                         <?php if (!empty($users)): ?>
                             <table>
@@ -564,7 +564,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php else: ?>
                             <p>No users found.</p>
                         <?php endif; ?>
-                    <?php elseif (hasPermission('read_department_users', 'Users')): ?>
+                    <?php elseif (hasPermission('read_department_users')): ?>
                         <p>Viewing users in your department(s):
                             <strong><?= htmlspecialchars(implode(', ', $user_departments)) ?></strong>
                         </p>
