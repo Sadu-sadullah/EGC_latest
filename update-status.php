@@ -11,6 +11,16 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
     die(json_encode(['success' => false, 'message' => 'Unauthorized access.']));
 }
 
+// Get the user's timezone from cookies
+if (isset($_COOKIE['user_timezone'])) {
+    $userTimeZone = $_COOKIE['user_timezone'];
+    date_default_timezone_set($userTimeZone);
+} else {
+    date_default_timezone_set('UTC'); // Default to UTC if timezone is missing
+}
+
+$currentTime = date('Y-m-d H:i:s');
+
 // Include the configuration file for database credentials
 $config = include '../config.php';
 
@@ -64,7 +74,7 @@ try {
     $bottom_table_statuses = ['Closed'];
 
     // Validate the status change based on the user's role and assigned_by_id
-    if ($user_role === 'Admin' || $assigned_by_id == $user_id) {
+    if (hasPermission('update_status_all') || $assigned_by_id == $user_id) {
         // Admin or the user who assigned the task can change status to any status except "In Progress", "Completed on Time", and "Delayed Completion"
         if (in_array($current_status, $top_table_statuses) && !in_array($new_status, ['In Progress', 'Completed on Time', 'Delayed Completion'])) {
             // Allow the status change
@@ -75,7 +85,7 @@ try {
         } else {
             die(json_encode(['success' => false, 'message' => 'Invalid status change.']));
         }
-    } elseif ($user_role === 'User' && $user_id == $assigned_user_id || $user_id === $assigned_user_id) {
+    } elseif (hasPermission('update_status_low') && $user_id == $assigned_user_id || $user_id === $assigned_user_id) {
         // Regular user or the assigned user can only change status if they are the assigned user
         if ($current_status === 'Assigned' || $current_status === 'Reassigned') {
             if (in_array($new_status, ['In Progress', 'Completed on Time', 'Delayed Completion'])) {
@@ -93,11 +103,12 @@ try {
         // Update status and set actual_start_date to the current timestamp
         $sql = "UPDATE tasks 
                 SET status = ?, 
-                    actual_start_date = NOW() 
+                    actual_start_date = ? 
                 WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
             $new_status,
+            $currentTime,
             $task_id
         ]);
     } elseif ($new_status === 'Completed on Time') {
@@ -105,12 +116,13 @@ try {
         $sql = "UPDATE tasks 
                 SET status = ?, 
                     completion_description = ?, 
-                    actual_finish_date = NOW() 
+                    actual_finish_date = ? 
                 WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
             $new_status,
             $completion_description,
+            $currentTime,
             $task_id
         ]);
     } elseif ($new_status === 'Delayed Completion') {
@@ -118,12 +130,13 @@ try {
         $sql = "UPDATE tasks 
                 SET status = ?, 
                     completion_description = ?, 
-                    actual_finish_date = NOW() 
+                    actual_finish_date = ?
                 WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
             $new_status,
             $completion_description,
+            $currentTime,
             $task_id
         ]);
 
