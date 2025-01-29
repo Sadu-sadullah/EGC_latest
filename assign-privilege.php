@@ -23,7 +23,7 @@ if (
 $_SESSION['last_activity'] = time();
 
 $config = include '../config.php';
-$dsn = "mysql:host=localhost;dbname=euro_login_system;charset=utf8mb4";
+$dsn = "mysql:host=localhost;dbname=euro_login_system_2;charset=utf8mb4";
 $username = $config['dbUsername'];
 $password = $config['dbPassword'];
 
@@ -64,15 +64,30 @@ try {
         $module_id = $_POST['module_id'];
         $permission_ids = $_POST['permissions'] ?? [];
 
+        // Add validation check
+        if (empty($role_id)) {
+            $_SESSION['errorMsg'] = "Please select a Role to assign or revoke privileges.";
+            header("Location: assign-privilege.php");
+            exit;
+        }
+
+        // Delete existing permissions for the role and module
         $pdo->prepare("DELETE FROM role_permissions WHERE role_id = ? AND module_id = ?")
             ->execute([$role_id, $module_id]);
 
+        // Insert new permissions for the role and module
         foreach ($permission_ids as $permission_id) {
-            $pdo->prepare("INSERT INTO role_permissions (role_id, permission_id, module_id) VALUES (?, ?, ?)")
+            $pdo->prepare("INSERT IGNORE INTO role_permissions (role_id, permission_id, module_id) VALUES (?, ?, ?)")
                 ->execute([$role_id, $permission_id, $module_id]);
         }
 
-        $_SESSION['successMsg'] = "Permissions assigned successfully.";
+        // If no permissions were selected, delete all permissions for the role and module
+        if (empty($permission_ids)) {
+            $pdo->prepare("DELETE FROM role_permissions WHERE role_id = ? AND module_id = ?")
+                ->execute([$role_id, $module_id]);
+        }
+
+        $_SESSION['successMsg'] = "Privileges updated successfully.";
         header("Location: assign-privilege.php");
         exit;
     }
@@ -109,7 +124,8 @@ function formatPermissionName($permissionName)
     // Capitalize first letter of each word using ucwords()
     $formattedWords = array_map('ucwords', $words);
     // Join words back together with spaces between them
-    return implode(' ', $formattedWords);}
+    return implode(' ', $formattedWords);
+}
 ?>
 
 <!DOCTYPE html>
@@ -446,7 +462,7 @@ function formatPermissionName($permissionName)
                                             <?php foreach ($moduleData['permissions'] as $permission): ?>
                                                 <div class="form-check form-check-inline">
                                                     <input class="form-check-input" type="checkbox" name="permissions[]"
-                                                        value="<?= $permission['id'] ?>">
+                                                        value="<?= $permission['id'] ?>" data-module-id="<?= $moduleId ?>">
                                                     <label
                                                         class="form-check-label"><?= formatPermissionName($permission['name']) ?></label>
                                                 </div>
@@ -546,7 +562,7 @@ function formatPermissionName($permissionName)
 
                     // Check the checkboxes based on the filtered privileges
                     data.forEach(function (privilege) {
-                        const checkbox = document.querySelector(`input[name="permissions[]"][value="${privilege.permission_id}"]`);
+                        const checkbox = document.querySelector(`input[name="permissions[]"][value="${privilege.permission_id}"][data-module-id="${moduleId}"]`);
                         if (checkbox) {
                             checkbox.checked = true;
                         }

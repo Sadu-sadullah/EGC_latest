@@ -21,7 +21,7 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
 
 // Database connection
 $config = include '../config.php';
-$dsn = "mysql:host=localhost;dbname=euro_login_system;charset=utf8mb4";
+$dsn = "mysql:host=localhost;dbname=euro_login_system_2;charset=utf8mb4";
 $username = $config['dbUsername'];
 $password = $config['dbPassword'];
 

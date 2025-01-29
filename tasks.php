@@ -60,7 +60,7 @@ $config = include '../config.php';
 $dbHost = 'localhost';
 $dbUsername = $config['dbUsername'];
 $dbPassword = $config['dbPassword'];
-$dbName = 'euro_login_system';
+$dbName = 'euro_login_system_2';
 
 $conn = new mysqli($dbHost, $dbUsername, $dbPassword, $dbName);
 
@@ -115,7 +115,7 @@ if (hasPermission('assign_tasks', 'Tasks')) {
             JOIN user_departments ud ON u.id = ud.user_id
             JOIN departments d ON ud.department_id = d.id
             JOIN roles r ON u.role_id = r.id
-            WHERE r.name IN ('User', 'Manager')
+            WHERE r.name != 'Admin'
             GROUP BY u.id
         ";
     } else {

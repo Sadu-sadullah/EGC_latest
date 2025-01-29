@@ -27,7 +27,7 @@ if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) >
 $_SESSION['last_activity'] = time();
 
 $config = include '../config.php';
-$dsn = "mysql:host=localhost;dbname=euro_login_system;charset=utf8mb4";
+$dsn = "mysql:host=localhost;dbname=euro_login_system_2;charset=utf8mb4";
 $username = $config['dbUsername'];
 $password = $config['dbPassword'];
 

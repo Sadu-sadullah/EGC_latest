@@ -5,7 +5,8 @@ $config = include '../config.php';
 $dbHost = 'localhost';
 $dbUsername = $config['dbUsername'];
 $dbPassword = $config['dbPassword'];
-$dbName = 'euro_login_system';
+// push try
+$dbName = 'euro_login_system_2';
 
 // Establish database connection
 $conn = new mysqli($dbHost, $dbUsername, $dbPassword, $dbName);

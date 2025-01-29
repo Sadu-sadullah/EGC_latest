@@ -4,7 +4,7 @@ $config = require '../config.php';
 
 // Database connection details
 $dbHost = 'localhost'; // Database host
-$dbName = 'euro_login_system'; // Database name
+$dbName = 'euro_login_system_2'; // Database name
 $dbUsername = $config['dbUsername']; // Database username from config
 $dbPassword = $config['dbPassword']; // Database password from config
 

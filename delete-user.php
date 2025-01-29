@@ -9,7 +9,7 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role
 
 // Include the database connection
 $config = include '../config.php';
-$dsn = "mysql:host=localhost;dbname=euro_login_system;charset=utf8mb4";
+$dsn = "mysql:host=localhost;dbname=euro_login_system_2;charset=utf8mb4";
 $username = $config['dbUsername'];
 $password = $config['dbPassword'];
 
