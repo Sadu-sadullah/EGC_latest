@@ -1112,11 +1112,11 @@ function getWeekdayHours($start, $end)
                                     <th>Status</th>
                                     <th>Project Type</th>
                                     <th>Assigned By</th>
-                                    <?php if ($user_role !== 'User'): ?>
+                                    <?php if (hasPermission('assign_tasks', 'Tasks')): ?>
                                         <th>Assigned To</th>
                                     <?php endif; ?>
                                     <th>Created On</th>
-                                    <?php if ($user_role !== 'User'): ?>
+                                    <?php if (hasPermission('assign_tasks', 'Tasks')): ?>
                                         <th>Actions</th>
                                     <?php endif; ?>
                                 </tr>
@@ -1229,7 +1229,7 @@ function getWeekdayHours($start, $end)
                                         <td><?= htmlspecialchars($row['assigned_by']) ?>
                                             (<?= htmlspecialchars($row['assigned_by_department']) ?>)
                                         </td>
-                                        <?php if ($user_role !== 'User'): ?>
+                                        <?php if (hasPermission('assign_tasks', 'Tasks')): ?>
                                             <td><?= htmlspecialchars($row['assigned_to']) ?>
                                                 (<?= htmlspecialchars($row['assigned_to_department']) ?>)
                                             </td>
@@ -1237,7 +1237,7 @@ function getWeekdayHours($start, $end)
                                         <td data-utc="<?= htmlspecialchars($row['recorded_timestamp']) ?>">
                                             <?= htmlspecialchars(date("d M Y, h:i A", strtotime($row['recorded_timestamp']))) ?>
                                         </td>
-                                        <?php if (($user_role !== 'User' && $row['assigned_by_id'] == $_SESSION['user_id']) || $user_role == 'Admin'): ?>
+                                        <?php if ((hasPermission('update_tasks', 'Tasks') && $row['assigned_by_id'] == $_SESSION['user_id']) || hasPermission('upate_tasks_all', 'Tasks')): ?>
                                             <td>
                                                 <a href="edit-tasks.php?id=<?= $row['task_id'] ?>" class="edit-button">Edit</a>
                                                 <button type="button" class="btn btn-danger" data-bs-toggle="modal"
@@ -1309,7 +1309,7 @@ function getWeekdayHours($start, $end)
                                     <th>Status</th>
                                     <th>Project Type</th>
                                     <th>Assigned By</th>
-                                    <?php if ($user_role !== 'User'): ?>
+                                    <?php if (hasPermission('assign_tasks', 'Tasks')): ?>
                                         <th>Assigned To</th>
                                     <?php endif; ?>
                                     <th>Created On</th>
@@ -1455,7 +1455,7 @@ function getWeekdayHours($start, $end)
                                         <td><?= htmlspecialchars($row['assigned_by']) ?>
                                             (<?= htmlspecialchars($row['assigned_by_department']) ?>)
                                         </td>
-                                        <?php if ($user_role !== 'User'): ?>
+                                        <?php if (hasPermission('assign_tasks', 'Tasks')): ?>
                                             <td><?= htmlspecialchars($row['assigned_to']) ?>
                                                 (<?= htmlspecialchars($row['assigned_to_department']) ?>)
                                             </td>

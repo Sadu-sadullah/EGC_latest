@@ -1,8 +1,11 @@
 <?php
 
 ini_set('display_errors', 1);
+// This code sets the display_errors configuration directive to 1, which enables error reporting.
 ini_set('display_startup_errors', 1);
+// This code sets the display_startup_errors configuration directive to 1, which enables error reporting when PHP is starting up.
 error_reporting(E_ALL);
+// This code sets the error_reporting configuration directive to E_ALL, which enables all types of error reporting.
 
 // Start session
 session_start();
