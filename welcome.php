@@ -41,6 +41,20 @@ function generateColors($count)
 try {
     $pdo = new PDO($dsn, $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->exec("SET sql_mode=(SELECT REPLACE(@@sql_mode, 'ONLY_FULL_GROUP_BY', ''))");
+
+    // Prepare and execute the query to fetch the session token
+    $checkStmt = $pdo->prepare("SELECT session_token FROM users WHERE id = ?");
+    $checkStmt->execute([$_SESSION['user_id']]);
+    $sessionToken = $checkStmt->fetchColumn();
+
+    // If the session token doesn't match, log the user out
+    if ($sessionToken !== $_SESSION['session_token']) {
+        session_unset();
+        session_destroy();
+        header("Location: portal-login.html");
+        exit;
+    }
 
     // Retrieve the username, role, and user ID from the session
     $username = $_SESSION['username'] ?? 'Unknown'; // Fallback to 'Unknown' if not set
@@ -155,7 +169,7 @@ try {
         FROM tasks
         WHERE status = 'Completed on Time'
         GROUP BY DATE_FORMAT(planned_finish_date, '%Y-%m')
-        ORDER BY planned_finish_date;
+        ORDER BY MIN(planned_finish_date);
         ");
         $stmt->execute();
         $taskCompletionOverTime = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -448,8 +462,6 @@ try {
 } catch (PDOException $e) {
     die("Error: " . $e->getMessage());
 }
-
-
 ?>
 <!DOCTYPE html>
 <html lang="en">

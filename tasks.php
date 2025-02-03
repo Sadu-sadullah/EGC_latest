@@ -68,6 +68,8 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
+$conn->query("SET sql_mode=(SELECT REPLACE(@@sql_mode, 'ONLY_FULL_GROUP_BY', ''))");
+
 // Fetch departments from the database
 $departments = $conn->query("SELECT id, name FROM departments")->fetch_all(MYSQLI_ASSOC);
 
@@ -144,12 +146,30 @@ if (hasPermission('assign_tasks')) {
 }
 
 // Function to send email notifications
-function sendTaskNotification($email, $username, $project_name, $project_type, $task_name, $task_description, $start_date, $end_date)
+function sendTaskNotification($email, $username, $project_name, $project_type, $task_name, $task_description, $start_date, $end_date, $assigned_by_id, $conn)
 {
     $mail = new PHPMailer(true);
 
     try {
         $config = include("../config.php");
+
+        // Fetch the assigned by user's details
+        $assignedByQuery = $conn->prepare("SELECT username FROM users WHERE id = ?");
+        $assignedByQuery->bind_param("i", $assigned_by_id);
+        $assignedByQuery->execute();
+        $assignedByResult = $assignedByQuery->get_result();
+
+        if ($assignedByResult->num_rows > 0) {
+            $assignedByUser = $assignedByResult->fetch_assoc();
+            $assignedByName = $assignedByUser['username'];
+        } else {
+            $assignedByName = "Unknown"; // Fallback if the assigned by user is not found
+        }
+
+        // Format the start and end dates
+        $formattedStartDate = (new DateTime($start_date))->format('d M Y, h:i A'); // e.g., 30 Jan 2025, 06:45 PM
+        $formattedEndDate = (new DateTime($end_date))->format('d M Y, h:i A'); // e.g., 01 Feb 2025, 06:45 PM
+
         // Server settings
         $mail->isSMTP();
         $mail->Host = 'smtppro.zoho.com'; // Update with your SMTP server
@@ -167,14 +187,14 @@ function sendTaskNotification($email, $username, $project_name, $project_type, $
         $mail->isHTML(true);
         $mail->Subject = 'New Task Assigned';
         $mail->Body = "<h3>Hello $username,</h3>" .
-            "<p>You have been assigned a new task:</p>" .
+            "<p>You have been assigned a new task by <strong>$assignedByName</strong>:</p>" .
             "<ul>" .
             "<li><strong>Project Name:</strong> $project_name</li>" .
             "<li><strong>Task Name:</strong> $task_name</li>" .
             "<li><strong>Task Description:</strong> $task_description</li>" .
             "<li><strong>Project Type:</strong> $project_type</li>" .
-            "<li><strong>Start Date:</strong> $start_date</li>" .
-            "<li><strong>End Date:</strong> $end_date</li>" .
+            "<li><strong>Start Date:</strong> $formattedStartDate</li>" .
+            "<li><strong>End Date:</strong> $formattedEndDate</li>" .
             "</ul>" .
             "<p>Please log in to your account for more details.</p>";
 
@@ -249,8 +269,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
                 $email = $user['email'];
                 $username = $user['username'];
 
-                // Send email notification
-                sendTaskNotification($email, $username, $project_name, $task_name, $task_description, $project_type, $planned_start_date, $planned_finish_date);
+                // Send email notification with assigned_by_id
+                sendTaskNotification(
+                    $email,
+                    $username,
+                    $project_name,
+                    $task_name,
+                    $task_description,
+                    $project_type,
+                    $planned_start_date,
+                    $planned_finish_date,
+                    $assigned_by_id, // Pass the assigned_by_id
+                    $conn // Pass the database connection
+                );
             }
         } else {
             echo '<script>alert("Failed to add task.");</script>';
@@ -629,6 +660,7 @@ function getWeekdayHours($start, $end)
             border-radius: 5px;
             font-size: 0.9rem;
             transition: background-color 0.3s ease;
+            text-align: center;
         }
 
         .edit-button:hover {
@@ -892,6 +924,38 @@ function getWeekdayHours($start, $end)
         #status-filter {
             width: 300px;
             /* Adjust width as needed */
+        }
+
+        .button-container {
+            display: flex;
+            /* Use flexbox for layout */
+            flex-direction: column;
+            /* Stack buttons vertically */
+            gap: 8px;
+            /* Add spacing between buttons */
+            align-items: stretch;
+            /* Make buttons stretch to the same width */
+        }
+
+        .button-container .btn {
+            width: 100%;
+            /* Make buttons take full width of the container */
+            text-align: center;
+            /* Center text inside buttons */
+            padding: 0.375rem 0.75rem;
+            /* Match Bootstrap's default button padding */
+            display: flex;
+            /* Use flexbox for centering */
+            justify-content: center;
+            /* Center text horizontally */
+            align-items: center;
+            /* Center text vertically */
+        }
+
+        /* Ensure the <a> and <button> elements look the same */
+        .button-container a.btn,
+        .button-container button.btn {
+            text-decoration: none;
         }
     </style>
 </head>
@@ -1239,11 +1303,14 @@ function getWeekdayHours($start, $end)
                                         </td>
                                         <?php if ((hasPermission('update_tasks') && $row['assigned_by_id'] == $_SESSION['user_id']) || hasPermission('upate_tasks_all')): ?>
                                             <td>
-                                                <a href="edit-tasks.php?id=<?= $row['task_id'] ?>" class="edit-button">Edit</a>
-                                                <button type="button" class="btn btn-danger" data-bs-toggle="modal"
-                                                    data-bs-target="#deleteModal<?= $row['task_id'] ?>">
-                                                    Delete
-                                                </button>
+                                                <div class="button-container">
+                                                    <a href="edit-tasks.php?id=<?= $row['task_id'] ?>"
+                                                        class="edit-button">Edit</a>
+                                                    <button type="button" class="btn btn-danger" data-bs-toggle="modal"
+                                                        data-bs-target="#deleteModal<?= $row['task_id'] ?>">
+                                                        Delete
+                                                    </button>
+                                                </div>
                                                 <!-- Delete Modal -->
                                                 <div class="modal fade" id="deleteModal<?= $row['task_id'] ?>" tabindex="-1"
                                                     aria-labelledby="deleteModalLabel" aria-hidden="true">
@@ -1279,7 +1346,7 @@ function getWeekdayHours($start, $end)
                                                 </div>
                                             </td>
                                         <?php else: ?>
-
+                                            <td>N/A</td>
                                         <?php endif; ?>
                                     </tr>
                                 <?php endforeach; ?>

@@ -5,7 +5,6 @@ $config = include '../config.php';
 $dbHost = 'localhost';
 $dbUsername = $config['dbUsername'];
 $dbPassword = $config['dbPassword'];
-// push try
 $dbName = 'euro_login_system';
 
 // Establish database connection
@@ -43,12 +42,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         // Verify the password
         if (password_verify($password, $user['password'])) {
-            // Password is correct, start a new session
+            // Generate a unique session token
+            $sessionToken = bin2hex(random_bytes(32));
+
+            // Update the user's session token in the database
+            $updateStmt = $conn->prepare("UPDATE users SET session_token = ? WHERE id = ?");
+            $updateStmt->bind_param("si", $sessionToken, $user['id']);
+            $updateStmt->execute();
+            $updateStmt->close();
+
+            // Start a new session
             session_regenerate_id(true); // Regenerate session ID for security
             $_SESSION['loggedin'] = true;
             $_SESSION['username'] = $username;
             $_SESSION['role'] = $user['role_name']; // Store role name
             $_SESSION['user_id'] = $user['id']; // Store user ID
+            $_SESSION['session_token'] = $sessionToken; // Store session token
 
             // Fetch all departments assigned to the user
             $departmentStmt = $conn->prepare("
@@ -88,9 +97,4 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
 // Close the connection
 $conn->close();
-
-// Display error if any
-if (isset($error)) {
-    echo '<script>alert("' . $error . '");</script>';
-}
 ?>
