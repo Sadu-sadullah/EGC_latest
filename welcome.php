@@ -52,8 +52,7 @@ try {
     if ($sessionToken !== $_SESSION['session_token']) {
         session_unset();
         session_destroy();
-        header("Location: portal-login.html");
-        exit;
+        echo "<script>alert('Another person has logged in using the same account. Please try logging in again.'); window.location.href='portal-login.html';</script>";
     }
 
     // Retrieve the username, role, and user ID from the session

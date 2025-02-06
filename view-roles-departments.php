@@ -35,6 +35,18 @@ try {
     $pdo = new PDO($dsn, $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
+    // Prepare and execute the query to fetch the session token
+    $checkStmt = $pdo->prepare("SELECT session_token FROM users WHERE id = ?");
+    $checkStmt->execute([$_SESSION['user_id']]);
+    $sessionToken = $checkStmt->fetchColumn();
+
+    // If the session token doesn't match, log the user out
+    if ($sessionToken !== $_SESSION['session_token']) {
+        session_unset();
+        session_destroy();
+        echo "<script>alert('Another person has logged in using the same account. Please try logging in again.'); window.location.href='portal-login.html';</script>";
+    }
+
     // Initialize error and success messages
     $errorMsg = $_SESSION['errorMsg'] ?? "";
     $successMsg = $_SESSION['successMsg'] ?? "";
