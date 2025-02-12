@@ -89,7 +89,7 @@ try {
             LEFT JOIN user_departments ud ON u.id = ud.user_id
             LEFT JOIN departments d ON ud.department_id = d.id
             WHERE d.name IN ($departmentPlaceholders) 
-              AND r.name NOT IN ('Admin', 'Manager') 
+              AND r.name NOT IN ('Admin') 
               AND u.id != ?
             GROUP BY u.id
             ORDER BY u.username

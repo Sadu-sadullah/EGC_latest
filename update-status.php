@@ -87,11 +87,15 @@ try {
     $assigned_user_id = $task['user_id'];
     $task_name = $task['task_name'];
 
-    // Define valid status categories
-    $top_table_statuses = ['Assigned', 'In Progress', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned', 'Completed on Time', 'Delayed Completion'];
-    $bottom_table_statuses = ['Closed'];
+    // Define status categories
+    $assignerStatuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
+    $normalUserStatuses = ['Assigned' => ['In Progress'], 'In Progress' => ['Completed on Time', 'Delayed Completion']];
+    $allowedStatuses = array_merge($assignerStatuses, ['Reassigned', 'In Progress', 'Completed on Time', 'Delayed Completion', 'Closed']);
 
-    // Permission validation (Ensure `hasPermission()` exists)
+    // Check if the task is self-assigned
+    $isSelfAssigned = ($assigned_by_id == $user_id && $assigned_user_id == $user_id);
+
+    // Permission validation
     if (!function_exists('hasPermission')) {
         function hasPermission($perm)
         {
@@ -99,26 +103,42 @@ try {
         }
     }
 
-    if (hasPermission('update_status_main') || $assigned_by_id == $user_id) {
-        if (in_array($current_status, $top_table_statuses) && !in_array($new_status, ['In Progress', 'Completed on Time', 'Delayed Completion'])) {
-            // Allow status change
-        } elseif (in_array($current_status, ['Completed on Time', 'Delayed Completion']) && $new_status === 'Closed') {
-            // Allow "Closed"
-        } elseif ($new_status === 'Reassigned') {
-            // Allow "Reassigned"
-        } else {
-            echo json_encode(['success' => false, 'message' => 'Invalid status change.']);
-            exit;
+    // Initialize allowed status array
+    $statuses = [];
+
+    // Logic for users with status_change_main or assigner (excluding self-assigned users)
+    if (hasPermission('status_change_main') || ($assigned_by_id == $user_id && !$isSelfAssigned)) {
+        if (in_array($current_status, $assignerStatuses)) {
+            $statuses = $assignerStatuses;
         }
-    } elseif (hasPermission('update_status_low') && $user_id === $assigned_user_id) {
-        if (in_array($current_status, ['Assigned', 'Reassigned', 'In Progress']) && in_array($new_status, ['In Progress', 'Completed on Time', 'Delayed Completion'])) {
-            // Allow status change
+    }
+
+    // Logic for self-assigned users with status_change_normal
+    if ($isSelfAssigned && hasPermission('status_change_normal')) {
+        $statuses = $assignerStatuses; // Start with assigner statuses
+
+        if (isset($normalUserStatuses[$current_status])) {
+            // Merge in the statuses that a normal assigned user would get
+            $statuses = array_merge($statuses, $normalUserStatuses[$current_status]);
         } else {
-            echo json_encode(['success' => false, 'message' => 'Unauthorized status change.']);
-            exit;
+            // Allow all default statuses from both assigner and normal user logic
+            if (in_array($current_status, $allowedStatuses)) {
+                $statuses = $allowedStatuses;
+            }
         }
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Unauthorized access.']);
+    }
+    // Logic for Regular User (assigned user)
+    elseif (hasPermission('status_change_normal') && $user_id === $assigned_user_id) {
+        if (isset($normalUserStatuses[$current_status])) {
+            $statuses = $normalUserStatuses[$current_status];
+        } elseif ($current_status === 'In Progress') {
+            $statuses = ['Completed on Time', 'Delayed Completion'];
+        }
+    }
+
+    // Validate the new status
+    if (!in_array($new_status, $statuses)) {
+        echo json_encode(['success' => false, 'message' => 'Invalid status change.']);
         exit;
     }
 

@@ -142,7 +142,6 @@ if (hasPermission('assign_tasks')) {
             JOIN departments d ON ud.department_id = d.id
             JOIN roles r ON u.role_id = r.id
             WHERE ud.department_id IN (SELECT department_id FROM user_departments WHERE user_id = ?)
-              AND r.name = 'User'
             GROUP BY u.id
         ";
     }
@@ -1254,27 +1253,44 @@ function getWeekdayHours($start, $end)
                                                 // Fetch the user_id of the assigned user
                                                 $assigned_user_id = $row['user_id'];
 
-                                                // Define the available statuses based on the user role and current status
+                                                // Initialize statuses array
                                                 $statuses = [];
 
-                                                // Logic for status_change_main privilege or the user who assigned the task
-                                                if (hasPermission('status_change_main') || $assigned_by_id == $user_id) {
-                                                    // status_change_main privilege or the user who assigned the task can change status to anything except "In Progress", "Completed on Time", and "Delayed Completion"
+                                                // Check if the task is self-assigned
+                                                $isSelfAssigned = ($assigned_by_id == $user_id && $assigned_user_id == $user_id);
+
+                                                // Define status sets
+                                                $assignerStatuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
+                                                $normalUserStatuses = ['Assigned' => ['In Progress'], 'In Progress' => ['Completed on Time', 'Delayed Completion']];
+
+                                                // Logic for status_change_main privilege or the user who assigned the task (excluding self-assigned)
+                                                if (hasPermission('status_change_main') || ($assigned_by_id == $user_id && !$isSelfAssigned)) {
                                                     if (in_array($currentStatus, ['Assigned', 'In Progress', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'])) {
-                                                        $statuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
+                                                        $statuses = $assignerStatuses;
+                                                    }
+                                                }
+                                                // Logic for self-assigned users with status_change_normal
+                                                elseif ($isSelfAssigned && hasPermission('status_change_normal')) {
+                                                    $statuses = $assignerStatuses; // Start with assigner statuses
+                                            
+                                                    if (isset($normalUserStatuses[$currentStatus])) {
+                                                        // Merge in the statuses that a normal assigned user would get
+                                                        $statuses = array_merge($statuses, $normalUserStatuses[$currentStatus]);
+                                                    } else {
+                                                        // Allow all default statuses from both assigner and normal user logic
+                                                        $allowedStatuses = array_merge($assignerStatuses, ['Reassigned', 'In Progress', 'Completed on Time', 'Delayed Completion']);
+                                                        if (in_array($currentStatus, $allowedStatuses)) {
+                                                            $statuses = $allowedStatuses;
+                                                        }
                                                     }
                                                 }
                                                 // Logic for Regular User (assigned user)
                                                 elseif (hasPermission('status_change_normal') && $user_id == $assigned_user_id) {
-                                                    // Regular user can only change status if they are the assigned user
-                                                    if ($currentStatus === 'Assigned') {
-                                                        // If the task is "Assigned", the next viable options are "In Progress"
-                                                        $statuses = ['In Progress'];
+                                                    if (isset($normalUserStatuses[$currentStatus])) {
+                                                        $statuses = $normalUserStatuses[$currentStatus];
                                                     } elseif ($currentStatus === 'In Progress') {
-                                                        // If the task is "In Progress", use the available statuses calculated earlier
                                                         $statuses = $row['available_statuses'];
                                                     } else {
-                                                        // For other statuses, allow the default transitions
                                                         $allowedStatuses = ['Assigned', 'Reassigned', 'In Progress', 'Completed on Time', 'Delayed Completion'];
                                                         if (in_array($currentStatus, $allowedStatuses)) {
                                                             $statuses = $allowedStatuses;
@@ -1285,18 +1301,15 @@ function getWeekdayHours($start, $end)
                                                 // Generate the status dropdown or display the status as text
                                                 if (!empty($statuses)) {
                                                     echo '<select id="status" name="status" onchange="handleStatusChange(event, ' . $row['task_id'] . ')">';
-                                                    // Always include the current status in the dropdown, even if it's not in the $statuses array
                                                     if (!in_array($currentStatus, $statuses)) {
                                                         echo "<option value='$currentStatus' selected>$currentStatus</option>";
                                                     }
-                                                    // Add the other status options
                                                     foreach ($statuses as $statusValue) {
                                                         $selected = ($currentStatus === $statusValue) ? 'selected' : '';
                                                         echo "<option value='$statusValue' $selected>$statusValue</option>";
                                                     }
                                                     echo '</select>';
                                                 } else {
-                                                    // Display the status as plain text if the user is not allowed to change it
                                                     echo $currentStatus;
                                                 }
                                                 ?>
@@ -1314,7 +1327,7 @@ function getWeekdayHours($start, $end)
                                         <td data-utc="<?= htmlspecialchars($row['recorded_timestamp']) ?>">
                                             <?= htmlspecialchars(date("d M Y, h:i A", strtotime($row['recorded_timestamp']))) ?>
                                         </td>
-                                        <?php if ((hasPermission('update_tasks') && $row['assigned_by_id'] == $_SESSION['user_id']) || hasPermission('upate_tasks_all')): ?>
+                                        <?php if ((hasPermission('update_tasks') && $row['assigned_by_id'] == $_SESSION['user_id']) || hasPermission('update_tasks_all')): ?>
                                             <td>
                                                 <div class="button-container">
                                                     <a href="edit-tasks.php?id=<?= $row['task_id'] ?>"
