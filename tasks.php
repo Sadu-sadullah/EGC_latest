@@ -89,6 +89,14 @@ $departments = $conn->query("SELECT id, name FROM departments")->fetch_all(MYSQL
 // Fetch roles from the database
 $roles = $conn->query("SELECT id, name FROM roles")->fetch_all(MYSQLI_ASSOC);
 
+// Fetch all unique project names from the tasks table
+$projectQuery = $conn->query("SELECT DISTINCT project_name FROM tasks");
+if ($projectQuery) {
+    $projects = $projectQuery->fetch_all(MYSQLI_ASSOC);
+} else {
+    die("Error fetching projects: " . $conn->error);
+}
+
 // Fetch logged-in user's details
 $userQuery = $conn->prepare("
     SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role 
@@ -470,7 +478,7 @@ foreach ($allTasks as &$task) {
     $plannedEndDate = strtotime($task['planned_finish_date']);
     $plannedDurationHours = getWeekdayHours($plannedStartDate, $plannedEndDate);
     $task['planned_duration_hours'] = $plannedDurationHours;
-    
+
     if (!empty($task['actual_start_date'])) {
         $actualStartDate = strtotime($task['actual_start_date']);
         $currentDate = time();
@@ -485,7 +493,7 @@ foreach ($allTasks as &$task) {
             $task['available_statuses'][] = 'Completed on Time';
         } else {
             $task['available_statuses'][] = 'Delayed Completion';
-        }        
+        }
     } else {
         $task['available_statuses'] = [];
         $task['actual_duration_hours'] = null;
@@ -993,24 +1001,36 @@ function getWeekdayHours($start, $end)
                 <div class="modal-body">
                     <form method="post" action="">
                         <input type="hidden" id="user-role" value="<?= htmlspecialchars($user_role) ?>">
+
+                        <!-- Project Name Field -->
                         <div class="form-group">
                             <label for="project_name">Project Name:</label>
-                            <input type="text" id="project_name" name="project_name" required>
+                            <select id="project_name_dropdown" class="form-control mb-2">
+                                <option value="">Select an existing project</option>
+                                <?php foreach ($projects as $project): ?>
+                                    <option value="<?= htmlspecialchars($project['project_name']) ?>">
+                                        <?= htmlspecialchars($project['project_name']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <input type="text" id="project_name" name="project_name" class="form-control" required>
+                        </div>
+
+                        <!-- Rest of the form fields -->
+                        <div class="form-group">
+                            <label for="task_name">Task Name:</label>
+                            <input type="text" id="task_name" name="task_name" class="form-control" required>
                         </div>
 
                         <div class="form-group">
-                            <label for="task_name">Task Name:</label>
-                            <input type="text" id="task_name" name="task_name" required>
-                        </div>
-
-                        <div>
                             <label for="task_description">Task Description:</label>
-                            <textarea id="task_description" name="task_description" rows="4"></textarea>
+                            <textarea id="task_description" name="task_description" rows="4"
+                                class="form-control"></textarea>
                         </div>
 
-                        <div>
+                        <div class="form-group">
                             <label for="project_type">Project Type:</label>
-                            <select id="project_type" name="project_type">
+                            <select id="project_type" name="project_type" class="form-control">
                                 <option value="Internal">Internal</option>
                                 <option value="External">External</option>
                             </select>
@@ -1018,29 +1038,27 @@ function getWeekdayHours($start, $end)
 
                         <div class="form-group">
                             <label for="planned_start_date">Expected Start Date & Time</label>
-                            <input type="datetime-local" id="planned_start_date" name="planned_start_date" required>
+                            <input type="datetime-local" id="planned_start_date" name="planned_start_date"
+                                class="form-control" required>
                         </div>
 
                         <div class="form-group">
                             <label for="planned_finish_date">Expected End Date & Time</label>
-                            <input type="datetime-local" id="planned_finish_date" name="planned_finish_date" required>
+                            <input type="datetime-local" id="planned_finish_date" name="planned_finish_date"
+                                class="form-control" required>
                         </div>
 
-                        <!-- Inside the task creation modal -->
                         <div class="form-group">
                             <label for="predecessor_task_id">Predecessor Task (Optional):</label>
-                            <select id="predecessor_task_id" name="predecessor_task_id">
+                            <select id="predecessor_task_id" name="predecessor_task_id" class="form-control">
                                 <option value="">Select a predecessor task</option>
                                 <?php
-                                // Assuming $user_id is defined and holds the current user's ID
                                 $predecessorTasksQuery = $conn->prepare("SELECT task_id, task_name FROM tasks WHERE predecessor_task_id IS NULL AND status = 'Assigned' AND assigned_by_id = ? ORDER BY recorded_timestamp DESC");
                                 $predecessorTasksQuery->bind_param("i", $user_id);
                                 $predecessorTasksQuery->execute();
                                 $result = $predecessorTasksQuery->get_result();
 
-                                // Check if there are any tasks available
                                 if ($result->num_rows > 0) {
-                                    // Fetch the first task to set as the selected option
                                     $predecessorTask = $result->fetch_assoc();
                                     echo "<option value='{$predecessorTask['task_id']}' selected>{$predecessorTask['task_name']}</option>";
                                 } else {
@@ -1052,7 +1070,7 @@ function getWeekdayHours($start, $end)
 
                         <div class="form-group">
                             <label for="assigned_user_id">Assign to:</label>
-                            <select id="assigned_user_id" name="assigned_user_id" required>
+                            <select id="assigned_user_id" name="assigned_user_id" class="form-control" required>
                                 <option value="">Select a user</option>
                                 <?php foreach ($users as $user): ?>
                                     <option value="<?= $user['id'] ?>">
@@ -1064,7 +1082,7 @@ function getWeekdayHours($start, $end)
                             </select>
                         </div>
 
-                        <button type="submit" class="submit-btn">Add Task</button>
+                        <button type="submit" class="btn btn-primary">Add Task</button>
                     </form>
                 </div>
                 <div class="modal-footer">
@@ -1297,7 +1315,7 @@ function getWeekdayHours($start, $end)
                                                 $normalUserStatuses = [
                                                     'Assigned' => ['In Progress'],
                                                     'In Progress' => isset($row['available_statuses'][0]) ? [$row['available_statuses'][0]] : []
-                                                ];                                                
+                                                ];
 
                                                 // Logic for status_change_main privilege or the user who assigned the task (excluding self-assigned)
                                                 if (hasPermission('status_change_main') || ($assigned_by_id == $user_id && !$isSelfAssigned)) {
@@ -2325,6 +2343,27 @@ function getWeekdayHours($start, $end)
                     window.addEventListener('resize', checkDescriptionHeight);
                 });
             </script>
+            <!-- JavaScript to handle the dropdown and text input interaction -->
+            <script>
+                document.addEventListener('DOMContentLoaded', function () {
+                    const projectNameDropdown = document.getElementById('project_name_dropdown');
+                    const projectNameInput = document.getElementById('project_name');
+
+                    // When an option is selected from the dropdown, populate the text input
+                    projectNameDropdown.addEventListener('change', function () {
+                        if (this.value) {
+                            projectNameInput.value = this.value;
+                        }
+                    });
+
+                    // When the user types in the text input, clear the dropdown selection
+                    projectNameInput.addEventListener('input', function () {
+                        if (this.value !== projectNameDropdown.value) {
+                            projectNameDropdown.value = '';
+                        }
+                    });
+                });
+            </script> 
     </body>
 
 </html>
