@@ -470,14 +470,22 @@ foreach ($allTasks as &$task) {
     $plannedEndDate = strtotime($task['planned_finish_date']);
     $plannedDurationHours = getWeekdayHours($plannedStartDate, $plannedEndDate);
     $task['planned_duration_hours'] = $plannedDurationHours;
-
+    
     if (!empty($task['actual_start_date'])) {
         $actualStartDate = strtotime($task['actual_start_date']);
         $currentDate = time();
         $actualDurationHours = getWeekdayHours($actualStartDate, $currentDate);
         $task['actual_duration_hours'] = $actualDurationHours;
 
-        $task['available_statuses'] = $actualDurationHours >= $plannedDurationHours ? ['Delayed Completion'] : ['Completed on Time'];
+        // Clear available statuses before assigning
+        $task['available_statuses'] = [];
+
+        // Assign status based on the duration comparison
+        if ($actualDurationHours <= $plannedDurationHours) {
+            $task['available_statuses'][] = 'Completed on Time';
+        } else {
+            $task['available_statuses'][] = 'Delayed Completion';
+        }        
     } else {
         $task['available_statuses'] = [];
         $task['actual_duration_hours'] = null;
@@ -1286,7 +1294,10 @@ function getWeekdayHours($start, $end)
 
                                                 // Define status sets
                                                 $assignerStatuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
-                                                $normalUserStatuses = ['Assigned' => ['In Progress'], 'In Progress' => ['Completed on Time', 'Delayed Completion']];
+                                                $normalUserStatuses = [
+                                                    'Assigned' => ['In Progress'],
+                                                    'In Progress' => isset($row['available_statuses'][0]) ? [$row['available_statuses'][0]] : []
+                                                ];                                                
 
                                                 // Logic for status_change_main privilege or the user who assigned the task (excluding self-assigned)
                                                 if (hasPermission('status_change_main') || ($assigned_by_id == $user_id && !$isSelfAssigned)) {
