@@ -228,6 +228,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
     $assigned_user_id = isset($_POST['assigned_user_id']) ? (int) $_POST['assigned_user_id'] : null;
     $recorded_timestamp = date("Y-m-d H:i:s");
     $assigned_by_id = $_SESSION['user_id'];
+    $predecessor_task_id = isset($_POST['predecessor_task_id']) && !empty($_POST['predecessor_task_id']) ? (int) $_POST['predecessor_task_id'] : null;
 
     $currentDate = new DateTime();
 
@@ -242,19 +243,33 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
     $threeMonthsAhead = clone $currentDate;
     $threeMonthsAhead->modify('+3 months');
 
-
-
     if (empty($project_name) || empty($task_name) || empty($task_description) || empty($project_type) || empty($planned_start_date) || empty($planned_finish_date) || !$assigned_user_id) {
         echo '<script>alert("Please fill in all required fields.");</script>';
     } elseif ($datePlannedStartDate < $threeMonthsAgo || $datePlannedEndDate > $threeMonthsAhead) {
         echo '<script>alert("Error: Planned start date is too far in the past or too far in the future.");</script>';
     } else {
-        $stmt = $conn->prepare(
-            "INSERT INTO tasks (user_id, project_name, task_name, task_description, project_type, planned_start_date, planned_finish_date, status, recorded_timestamp, assigned_by_id) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        );
-        $stmt->bind_param(
-            "issssssssi",
+        // Prepare the SQL query with the appropriate number of placeholders
+        $placeholders = [
+            'user_id',
+            'project_name',
+            'task_name',
+            'task_description',
+            'project_type',
+            'planned_start_date',
+            'planned_finish_date',
+            'status',
+            'recorded_timestamp',
+            'assigned_by_id'
+        ];
+
+        if ($predecessor_task_id !== null) {
+            $placeholders[] = 'predecessor_task_id';
+        }
+
+        $sql = "INSERT INTO tasks (" . implode(", ", $placeholders) . ") VALUES (" . str_repeat('?,', count($placeholders) - 1) . "?)";
+
+        $stmt = $conn->prepare($sql);
+        $params = [
             $assigned_user_id,
             $project_name,
             $task_name,
@@ -265,7 +280,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
             $status,
             $recorded_timestamp,
             $assigned_by_id
-        );
+        ];
+
+        if ($predecessor_task_id !== null) {
+            $params[] = $predecessor_task_id;
+        }
+
+        $types = str_repeat('s', count($params) - 1) . 'i'; // Adjust types for the last parameter which is an integer
+
+        $stmt->bind_param($types, ...$params);
 
         if ($stmt->execute()) {
             echo '<script>alert("Task added successfully.");</script>';
@@ -319,13 +342,15 @@ if (hasPermission('view_all_tasks')) {
             tasks.recorded_timestamp,
             tasks.assigned_by_id,
             tasks.user_id,
+            tasks.predecessor_task_id, -- Add predecessor_task_id
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
             assigned_to_user.username AS assigned_to, 
             GROUP_CONCAT(DISTINCT assigned_to_department.name SEPARATOR ', ') AS assigned_to_department, 
             assigned_by_user.username AS assigned_by,
-            GROUP_CONCAT(DISTINCT assigned_by_department.name SEPARATOR ', ') AS assigned_by_department 
+            GROUP_CONCAT(DISTINCT assigned_by_department.name SEPARATOR ', ') AS assigned_by_department,
+            predecessor_task.task_name AS predecessor_task_name -- Add predecessor task name
         FROM tasks 
         LEFT JOIN task_transactions ON tasks.task_id = task_transactions.task_id
         JOIN users AS assigned_to_user ON tasks.user_id = assigned_to_user.id 
@@ -334,6 +359,7 @@ if (hasPermission('view_all_tasks')) {
         JOIN users AS assigned_by_user ON tasks.assigned_by_id = assigned_by_user.id 
         JOIN user_departments AS assigned_by_ud ON assigned_by_user.id = assigned_by_ud.user_id
         JOIN departments AS assigned_by_department ON assigned_by_ud.department_id = assigned_by_department.id
+        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id -- Join predecessor task
         GROUP BY tasks.task_id
         ORDER BY 
             CASE 
@@ -440,33 +466,21 @@ $result = $stmt->get_result();
 $allTasks = $result->fetch_all(MYSQLI_ASSOC);
 
 foreach ($allTasks as &$task) {
-    // Calculate planned duration (excluding weekends)
     $plannedStartDate = strtotime($task['planned_start_date']);
     $plannedEndDate = strtotime($task['planned_finish_date']);
     $plannedDurationHours = getWeekdayHours($plannedStartDate, $plannedEndDate);
-
-    // Store planned duration in the task array
     $task['planned_duration_hours'] = $plannedDurationHours;
 
-    // Calculate actual duration (from actual start date to current date)
     if (!empty($task['actual_start_date'])) {
         $actualStartDate = strtotime($task['actual_start_date']);
-        $currentDate = time(); // Current date and time
+        $currentDate = time();
         $actualDurationHours = getWeekdayHours($actualStartDate, $currentDate);
-
-        // Store actual duration in the task array
         $task['actual_duration_hours'] = $actualDurationHours;
 
-        // Determine available statuses based on the comparison
-        if ($actualDurationHours >= $plannedDurationHours) {
-            $task['available_statuses'] = ['Delayed Completion'];
-        } else {
-            $task['available_statuses'] = ['Completed on Time'];
-        }
+        $task['available_statuses'] = $actualDurationHours >= $plannedDurationHours ? ['Delayed Completion'] : ['Completed on Time'];
     } else {
-        // If actual start date is not set, no status change is allowed
         $task['available_statuses'] = [];
-        $task['actual_duration_hours'] = null; // Set actual duration to null
+        $task['actual_duration_hours'] = null;
     }
 }
 
@@ -486,32 +500,18 @@ function getWeekdayHours($start, $end)
 {
     $weekdayHours = 0;
     $current = $start;
-
-    // Loop through each day between start and end
     while ($current <= $end) {
-        $dayOfWeek = date('N', $current); // 1 (Monday) to 7 (Sunday)
-
-        // Exclude weekends
+        $dayOfWeek = date('N', $current);
         if ($dayOfWeek <= 5) {
-            // Calculate the start and end of the current day
-            $startOfDay = strtotime('today', $current); // Start of the day (00:00:00)
-            $endOfDay = strtotime('tomorrow', $current) - 1; // End of the day (23:59:59)
-
-            // Adjust the start and end times to fit within the current day
+            $startOfDay = strtotime('today', $current);
+            $endOfDay = strtotime('tomorrow', $current) - 1;
             $startTime = max($start, $startOfDay);
             $endTime = min($end, $endOfDay);
-
-            // Calculate the hours for the current day
-            $hours = ($endTime - $startTime) / 3600; // Convert seconds to hours
-
-            // Add the hours to the total
+            $hours = ($endTime - $startTime) / 3600;
             $weekdayHours += $hours;
         }
-
-        // Move to the next day
         $current = strtotime('+1 day', $current);
     }
-
     return $weekdayHours;
 }
 ?>
@@ -1018,6 +1018,21 @@ function getWeekdayHours($start, $end)
                             <input type="datetime-local" id="planned_finish_date" name="planned_finish_date" required>
                         </div>
 
+                        <!-- Inside the task creation modal -->
+                        <div class="form-group">
+                            <label for="predecessor_task_id">Predecessor Task (Optional):</label>
+                            <select id="predecessor_task_id" name="predecessor_task_id">
+                                <option value="">Select a predecessor task</option>
+                                <?php
+                                // Fetch tasks that are not already sequential to another task
+                                $predecessorTasksQuery = $conn->query("SELECT task_id, task_name FROM tasks WHERE predecessor_task_id IS NULL AND status = 'Assigned' ORDER BY recorded_timestamp DESC");
+                                while ($predecessorTask = $predecessorTasksQuery->fetch_assoc()) {
+                                    echo "<option value='{$predecessorTask['task_id']}'>{$predecessorTask['task_name']}</option>";
+                                }
+                                ?>
+                            </select>
+                        </div>
+
                         <div class="form-group">
                             <label for="assigned_user_id">Assign to:</label>
                             <select id="assigned_user_id" name="assigned_user_id" required>
@@ -1192,6 +1207,7 @@ function getWeekdayHours($start, $end)
                                         <th>Assigned To</th>
                                     <?php endif; ?>
                                     <th>Created On</th>
+                                    <th>Predecessor Task</th>
                                     <?php if (hasPermission('assign_tasks')): ?>
                                         <th>Actions</th>
                                     <?php endif; ?>
@@ -1254,7 +1270,7 @@ function getWeekdayHours($start, $end)
                                                 $assigned_user_id = $row['user_id'];
 
                                                 // Initialize statuses array
-                                                $statuses = [];
+                                                $statuses = []; 
 
                                                 // Check if the task is self-assigned
                                                 $isSelfAssigned = ($assigned_by_id == $user_id && $assigned_user_id == $user_id);
@@ -1327,6 +1343,7 @@ function getWeekdayHours($start, $end)
                                         <td data-utc="<?= htmlspecialchars($row['recorded_timestamp']) ?>">
                                             <?= htmlspecialchars(date("d M Y, h:i A", strtotime($row['recorded_timestamp']))) ?>
                                         </td>
+                                        <td><?= htmlspecialchars($row['predecessor_task_name'] ?? 'N/A') ?></td>
                                         <?php if ((hasPermission('update_tasks') && $row['assigned_by_id'] == $_SESSION['user_id']) || hasPermission('update_tasks_all')): ?>
                                             <td>
                                                 <div class="button-container">
@@ -1406,6 +1423,7 @@ function getWeekdayHours($start, $end)
                                         <th>Assigned To</th>
                                     <?php endif; ?>
                                     <th>Created On</th>
+                                    <th>Predecessor Task</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1556,6 +1574,7 @@ function getWeekdayHours($start, $end)
                                         <td data-utc="<?= htmlspecialchars($row['recorded_timestamp']) ?>">
                                             <?= htmlspecialchars(date("d M Y, h:i A", strtotime($row['recorded_timestamp']))) ?>
                                         </td>
+                                        <td><?= htmlspecialchars($row['predecessor_task_name'] ?? 'N/A') ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -1591,6 +1610,9 @@ function getWeekdayHours($start, $end)
                                 <input type="hidden" id="modal-status" name="status">
                                 <!-- Hidden input for Actual Completion Date (automatically populated) -->
                                 <input type="hidden" id="actual-completion-date" name="actual_finish_date">
+
+                                <!-- Display predecessor task name -->
+                                <p><strong>Predecessor Task:</strong> <span id="predecessor-task-name"></span></p>
 
                                 <!-- Completion Description -->
                                 <div class="mb-3">
@@ -1803,6 +1825,9 @@ function getWeekdayHours($start, $end)
                     const status = event.target.value;
                     const form = event.target.form;
 
+                    // Fetch the predecessor task name
+                    const predecessorTaskName = $(`#pending-tasks tr[data-task-id="${taskId}"]`).find('td:eq(12)').text();
+
                     if (status === 'Reassigned') {
                         // Show the reassignment modal
                         document.getElementById('reassign-task-id').value = taskId;
@@ -1812,6 +1837,7 @@ function getWeekdayHours($start, $end)
                         // Set the task ID and status in the completion modal
                         document.getElementById('task-id').value = taskId;
                         document.getElementById('modal-status').value = status;
+                        document.getElementById('predecessor-task-name').innerText = predecessorTaskName; // Set predecessor task name
 
                         // Show or hide the delayed reason container based on the status
                         const delayedReasonContainer = document.getElementById('delayed-reason-container');

@@ -40,10 +40,10 @@ $dbPassword = $config['dbPassword'] ?? null;
 $dbName = 'euro_login_system';
 
 // Check if database credentials exist
-if (!$dbUsername || !$dbPassword) {
-    echo json_encode(['success' => false, 'message' => 'Database credentials missing.']);
-    exit;
-}
+// if (!$dbUsername || !$dbPassword) {
+//     echo json_encode(['success' => false, 'message' => 'Database credentials missing.']);
+//     exit;
+// }
 
 include 'permissions.php';
 
@@ -73,7 +73,7 @@ try {
     }
 
     // Fetch the current task details
-    $stmt = $pdo->prepare("SELECT status, assigned_by_id, user_id, task_name FROM tasks WHERE task_id = ?");
+    $stmt = $pdo->prepare("SELECT status, assigned_by_id, user_id, task_name, predecessor_task_id FROM tasks WHERE task_id = ?");
     $stmt->execute([$task_id]);
     $task = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -86,6 +86,7 @@ try {
     $assigned_by_id = $task['assigned_by_id'];
     $assigned_user_id = $task['user_id'];
     $task_name = $task['task_name'];
+    $predecessor_task_id = $task['predecessor_task_id'];
 
     // Define status categories
     $assignerStatuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
@@ -142,11 +143,28 @@ try {
         exit;
     }
 
+    // Check if the task has a predecessor and ensure it is completed before starting the task
+    if ($predecessor_task_id && $new_status === 'In Progress') {
+        $predecessorStmt = $pdo->prepare("SELECT status, actual_finish_date FROM tasks WHERE task_id = ?");
+        $predecessorStmt->execute([$predecessor_task_id]);
+        $predecessorTask = $predecessorStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$predecessorTask || !in_array($predecessorTask['status'], ['Completed on Time', 'Delayed Completion'])) {
+            echo json_encode(['success' => false, 'message' => 'Cannot start this task until the predecessor task is completed.']);
+            exit;
+        }
+
+        // Set the actual start date of the sequential task to the day after the predecessor's actual finish date
+        $actualStartDate = date('Y-m-d H:i:s', strtotime($predecessorTask['actual_finish_date'] . ' +1 day'));
+    } else {
+        $actualStartDate = $currentTime;
+    }
+
     // Perform task update based on new status
     if ($new_status === 'In Progress') {
         $sql = "UPDATE tasks SET status = ?, actual_start_date = ? WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$new_status, $currentTime, $task_id]);
+        $stmt->execute([$new_status, $actualStartDate, $task_id]);
     } elseif ($new_status === 'Completed on Time' || $new_status === 'Delayed Completion') {
         $sql = "UPDATE tasks SET status = ?, completion_description = ?, actual_finish_date = ? WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);
