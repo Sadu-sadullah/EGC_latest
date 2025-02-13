@@ -1024,10 +1024,19 @@ function getWeekdayHours($start, $end)
                             <select id="predecessor_task_id" name="predecessor_task_id">
                                 <option value="">Select a predecessor task</option>
                                 <?php
-                                // Fetch tasks that are not already sequential to another task
-                                $predecessorTasksQuery = $conn->query("SELECT task_id, task_name FROM tasks WHERE predecessor_task_id IS NULL AND status = 'Assigned' ORDER BY recorded_timestamp DESC");
-                                while ($predecessorTask = $predecessorTasksQuery->fetch_assoc()) {
-                                    echo "<option value='{$predecessorTask['task_id']}'>{$predecessorTask['task_name']}</option>";
+                                // Assuming $user_id is defined and holds the current user's ID
+                                $predecessorTasksQuery = $conn->prepare("SELECT task_id, task_name FROM tasks WHERE predecessor_task_id IS NULL AND status = 'Assigned' AND assigned_by_id = ? ORDER BY recorded_timestamp DESC");
+                                $predecessorTasksQuery->bind_param("i", $user_id);
+                                $predecessorTasksQuery->execute();
+                                $result = $predecessorTasksQuery->get_result();
+
+                                // Check if there are any tasks available
+                                if ($result->num_rows > 0) {
+                                    // Fetch the first task to set as the selected option
+                                    $predecessorTask = $result->fetch_assoc();
+                                    echo "<option value='{$predecessorTask['task_id']}' selected>{$predecessorTask['task_name']}</option>";
+                                } else {
+                                    echo "<option value='' disabled>No available predecessor tasks</option>";
                                 }
                                 ?>
                             </select>
@@ -1270,7 +1279,7 @@ function getWeekdayHours($start, $end)
                                                 $assigned_user_id = $row['user_id'];
 
                                                 // Initialize statuses array
-                                                $statuses = []; 
+                                                $statuses = [];
 
                                                 // Check if the task is self-assigned
                                                 $isSelfAssigned = ($assigned_by_id == $user_id && $assigned_user_id == $user_id);
