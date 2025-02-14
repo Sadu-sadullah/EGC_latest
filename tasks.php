@@ -1005,7 +1005,8 @@ function getWeekdayHours($start, $end)
                         <!-- Project Name Field -->
                         <div class="form-group">
                             <label for="project_name">Project Name:</label>
-                            <select id="project_name_dropdown" class="form-control mb-2">
+                            <select id="project_name_dropdown" class="form-control mb-2"
+                                onchange="fetchPredecessorTasks(this.value)">
                                 <option value="">Select an existing project</option>
                                 <?php foreach ($projects as $project): ?>
                                     <option value="<?= htmlspecialchars($project['project_name']) ?>">
@@ -1013,7 +1014,17 @@ function getWeekdayHours($start, $end)
                                     </option>
                                 <?php endforeach; ?>
                             </select>
-                            <input type="text" id="project_name" name="project_name" class="form-control" required>
+                            <input type="text" id="project_name" name="project_name" class="form-control"
+                                oninput="fetchPredecessorTasks(this.value)" required>
+                        </div>
+
+                        <!-- Predecessor Task Field -->
+                        <div class="form-group">
+                            <label for="predecessor_task_id">Predecessor Task (Optional):</label>
+                            <select id="predecessor_task_id" name="predecessor_task_id" class="form-control">
+                                <option value="">Select a predecessor task</option>
+                                <!-- Predecessor tasks will be dynamically populated here -->
+                            </select>
                         </div>
 
                         <!-- Rest of the form fields -->
@@ -1046,26 +1057,6 @@ function getWeekdayHours($start, $end)
                             <label for="planned_finish_date">Expected End Date & Time</label>
                             <input type="datetime-local" id="planned_finish_date" name="planned_finish_date"
                                 class="form-control" required>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="predecessor_task_id">Predecessor Task (Optional):</label>
-                            <select id="predecessor_task_id" name="predecessor_task_id" class="form-control">
-                                <option value="">Select a predecessor task</option>
-                                <?php
-                                $predecessorTasksQuery = $conn->prepare("SELECT task_id, task_name FROM tasks WHERE predecessor_task_id IS NULL AND status = 'Assigned' AND assigned_by_id = ? ORDER BY recorded_timestamp DESC");
-                                $predecessorTasksQuery->bind_param("i", $user_id);
-                                $predecessorTasksQuery->execute();
-                                $result = $predecessorTasksQuery->get_result();
-
-                                if ($result->num_rows > 0) {
-                                    $predecessorTask = $result->fetch_assoc();
-                                    echo "<option value='{$predecessorTask['task_id']}' selected>{$predecessorTask['task_name']}</option>";
-                                } else {
-                                    echo "<option value='' disabled>No available predecessor tasks</option>";
-                                }
-                                ?>
-                            </select>
                         </div>
 
                         <div class="form-group">
@@ -2363,7 +2354,55 @@ function getWeekdayHours($start, $end)
                         }
                     });
                 });
-            </script> 
+            </script>
+            <script>
+                function fetchPredecessorTasks(projectName) {
+                    if (!projectName) {
+                        document.getElementById('predecessor_task_id').innerHTML = '<option value="">Select a predecessor task</option>';
+                        return;
+                    }
+
+                    console.log("Fetching predecessor tasks for project:", projectName);
+
+                    // Fetch predecessor tasks for the selected project
+                    fetch('fetch-predecessor-tasks.php', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: `project_name=${encodeURIComponent(projectName)}&user_id=<?= $user_id ?>`
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            console.log("Received response:", data); // Debugging
+
+                            const predecessorDropdown = document.getElementById('predecessor_task_id');
+                            predecessorDropdown.innerHTML = '<option value="">Select a predecessor task</option>';
+
+                            if (Array.isArray(data)) {
+                                if (data.length > 0) {
+                                    data.forEach(task => {
+                                        const option = document.createElement('option');
+                                        option.value = task.task_id;
+                                        option.textContent = task.task_name;
+                                        predecessorDropdown.appendChild(option);
+                                    });
+                                } else {
+                                    const option = document.createElement('option');
+                                    option.value = '';
+                                    option.textContent = 'No available predecessor tasks';
+                                    option.disabled = true;
+                                    predecessorDropdown.appendChild(option);
+                                }
+                            } else {
+                                console.error("Invalid response format:", data);
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error fetching predecessor tasks:', error);
+                        });
+                }
+            </script>
     </body>
 
 </html>
