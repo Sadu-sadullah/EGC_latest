@@ -20,12 +20,12 @@ if ($conn->connect_error) {
 }
 
 // Get input values
-$projectName = $_POST['project_name'] ?? '';
+$projectId = $_POST['project_id'] ?? 0; // Use project_id
 $userId = $_POST['user_id'] ?? 0;
 
 // Validate inputs
-if (empty($projectName) || empty($userId)) {
-    echo json_encode(["error" => "Invalid input: Project Name or User ID is missing."]);
+if (empty($projectId) || empty($userId)) {
+    echo json_encode(["error" => "Invalid input: Project ID or User ID is missing."]);
     exit;
 }
 
@@ -36,12 +36,12 @@ $predecessorTasksQuery = $conn->prepare("
     WHERE predecessor_task_id IS NULL 
       AND status = 'Assigned' 
       AND assigned_by_id = ? 
-      AND project_name = ?
+      AND project_id = ? 
     ORDER BY recorded_timestamp DESC
 ");
 
 // Bind parameters and execute query
-$predecessorTasksQuery->bind_param("is", $userId, $projectName);
+$predecessorTasksQuery->bind_param("ii", $userId, $projectId); // Bind project_id as an integer
 $predecessorTasksQuery->execute();
 $result = $predecessorTasksQuery->get_result();
 
@@ -60,5 +60,4 @@ if (json_last_error() !== JSON_ERROR_NONE) {
 header('Content-Type: application/json');
 echo json_encode($tasks);
 exit;
-
 ?>
