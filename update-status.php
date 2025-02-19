@@ -181,6 +181,11 @@ try {
         $stmt->execute([$new_status, $task_id]);
     }
 
+    // Log the status change in task_timeline
+    $sql = "INSERT INTO task_timeline (task_id, action, previous_status, new_status, changed_by_user_id) VALUES (?, 'status_changed', ?, ?, ?)";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$task_id, $current_status, $new_status, $user_id]);
+
     // Successful response
     echo json_encode(['success' => true, 'message' => 'Status updated successfully.', 'task_name' => $task_name]);
 } catch (PDOException $e) {

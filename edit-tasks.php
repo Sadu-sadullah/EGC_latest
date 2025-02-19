@@ -17,6 +17,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] === 'user') {
 }
 
 $user_role = $_SESSION['role'];
+$user_id = $_SESSION['user_id'];
 
 try {
     $pdo = new PDO($dsn, $username, $password);
@@ -36,40 +37,74 @@ try {
         exit;
     }
 
-    // Handle form submission
+    // Fetch predecessor tasks for the selected project, excluding the current task
+    $predecessorTasksStmt = $pdo->prepare("
+        SELECT task_id, task_name 
+        FROM tasks 
+        WHERE predecessor_task_id IS NULL 
+          AND status = 'Assigned' 
+          AND assigned_by_id = :assigned_by_id 
+          AND project_id = :project_id 
+          AND task_id != :task_id
+        ORDER BY recorded_timestamp DESC
+    ");
+    $predecessorTasksStmt->bindParam(':assigned_by_id', $user_id, PDO::PARAM_INT);
+    $predecessorTasksStmt->bindParam(':project_id', $task['project_id'], PDO::PARAM_INT);
+    $predecessorTasksStmt->bindParam(':task_id', $taskId, PDO::PARAM_INT);
+    $predecessorTasksStmt->execute();
+    $predecessorTasks = $predecessorTasksStmt->fetchAll(PDO::FETCH_ASSOC);
+
     // Handle form submission
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Ensure all form values are captured properly
-        $projectName = trim($_POST['project_name']);
-        $taskName = trim($_POST['task_name']);
-        $taskDescription = trim($_POST['task_description']);
-        $projectType = trim($_POST['project_type']);
-        $expectedStartDate = trim($_POST['planned_start_date']);
-        $expectedFinishDate = trim($_POST['planned_finish_date']);
+        $project_id = trim($_POST['project_id']);
+        $task_name = trim($_POST['task_name']);
+        $task_description = trim($_POST['task_description']);
+        $project_type = trim($_POST['project_type']);
+        $planned_start_date = trim($_POST['planned_start_date']);
+        $planned_finish_date = trim($_POST['planned_finish_date']);
+        $user_id = trim($_POST['user_id']);
+        $predecessor_task_id = isset($_POST['predecessor_task_id']) && !empty($_POST['predecessor_task_id']) ? trim($_POST['predecessor_task_id']) : null;
 
         // Validate inputs
-        if (empty($taskName) || empty($projectName) || empty($taskDescription) || empty($projectType) || empty($expectedStartDate) || empty($expectedFinishDate)) {
+        if (empty($task_name) || empty($project_id) || empty($task_description) || empty($project_type) || empty($planned_start_date) || empty($planned_finish_date) || empty($user_id)) {
             $error = "All fields are required.";
         } else {
             // Update the task in the database
-            $updateStmt = $pdo->prepare("UPDATE tasks SET project_name = :project_name, task_name = :task_name, task_description = :task_description, project_type = :project_type, planned_start_date = :planned_start_date, planned_finish_date = :planned_finish_date WHERE task_id = :task_id");
-            $updateStmt->bindParam(':project_name', $projectName);
-            $updateStmt->bindParam(':task_name', $taskName);
-            $updateStmt->bindParam(':task_description', $taskDescription);
-            $updateStmt->bindParam(':project_type', $projectType);
-            $updateStmt->bindParam(':planned_start_date', $expectedStartDate);
-            $updateStmt->bindParam(':planned_finish_date', $expectedFinishDate);
+            $updateStmt = $pdo->prepare("
+                UPDATE tasks 
+                SET 
+                    project_id = :project_id,
+                    task_name = :task_name, 
+                    task_description = :task_description, 
+                    project_type = :project_type, 
+                    planned_start_date = :planned_start_date, 
+                    planned_finish_date = :planned_finish_date,
+                    user_id = :user_id,
+                    predecessor_task_id = :predecessor_task_id
+                WHERE task_id = :task_id
+            ");
+            $updateStmt->bindParam(':project_id', $project_id);
+            $updateStmt->bindParam(':task_name', $task_name);
+            $updateStmt->bindParam(':task_description', $task_description);
+            $updateStmt->bindParam(':project_type', $project_type);
+            $updateStmt->bindParam(':planned_start_date', $planned_start_date);
+            $updateStmt->bindParam(':planned_finish_date', $planned_finish_date);
+            $updateStmt->bindParam(':user_id', $user_id);
+            $updateStmt->bindParam(':predecessor_task_id', $predecessor_task_id);
             $updateStmt->bindParam(':task_id', $taskId);
 
             if ($updateStmt->execute()) {
                 $success = "Task updated successfully.";
                 // Refresh task details after update
-                $task['project_name'] = $projectName;
-                $task['task_name'] = $taskName;
-                $task['task_description'] = $taskDescription;
-                $task['project_type'] = $projectType;
-                $task['planned_start_date'] = $expectedStartDate;
-                $task['planned_finish_date'] = $expectedFinishDate;
+                $task['project_id'] = $project_id;
+                $task['task_name'] = $task_name;
+                $task['task_description'] = $task_description;
+                $task['project_type'] = $project_type;
+                $task['planned_start_date'] = $planned_start_date;
+                $task['planned_finish_date'] = $planned_finish_date;
+                $task['user_id'] = $user_id;
+                $task['predecessor_task_id'] = $predecessor_task_id;
             } else {
                 $error = "Failed to update task. Please try again.";
             }
@@ -180,9 +215,7 @@ try {
             border: 1px solid #ccc;
             border-radius: 4px;
             box-sizing: border-box;
-            /* Ensure consistent box sizing */
             resize: vertical;
-            /* Allows resizing vertically */
             font-family: Arial, sans-serif;
             font-size: 14px;
             line-height: 1.5;
@@ -201,44 +234,87 @@ try {
         <?php endif; ?>
         <form method="POST">
             <div class="form-group">
-                <label for="project_name">Project Name:</label>
-                <input type="text" id="project_name" name="project_name"
-                    value="<?= htmlspecialchars($task['project_name']) ?>" required>
+                <label for="project_id">Project Name:</label>
+                <select id="project_id" name="project_id" required>
+                    <option value="">Select an existing project</option>
+                    <?php
+                    $projectsStmt = $pdo->query("SELECT id, project_name FROM projects");
+                    $projects = $projectsStmt->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($projects as $project): ?>
+                        <option value="<?= htmlspecialchars($project['id']) ?>" 
+                            <?php if ($project['id'] == $task['project_id']) echo 'selected'; ?>>
+                            <?= htmlspecialchars($project['project_name']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
             </div>
             <div class="form-group">
                 <label for="task_name">Task Name</label>
-                <input type="text" id="task_name" name="task_name" value="<?= htmlspecialchars($task['task_name']) ?>"
-                    required>
+                <input type="text" id="task_name" name="task_name" value="<?= htmlspecialchars($task['task_name']) ?>" required>
             </div>
-            <div>
+            <div class="form-group">
                 <label for="task_description">Task Description:</label>
-                <textarea id="task_description" name="task_description"
-                    rows="4"><?= htmlspecialchars($task['task_description']) ?></textarea>
+                <textarea id="task_description" name="task_description" rows="4"><?= htmlspecialchars($task['task_description']) ?></textarea>
             </div>
-            <div>
+            <div class="form-group">
                 <label for="project_type">Project Type:</label>
                 <select id="project_type" name="project_type">
-                    <option value="Internal">Internal</option>
-                    <option value="External">External</option>
+                    <option value="Internal" <?php if ($task['project_type'] == 'Internal') echo 'selected'; ?>>Internal</option>
+                    <option value="External" <?php if ($task['project_type'] == 'External') echo 'selected'; ?>>External</option>
                 </select>
             </div>
             <div class="form-group">
                 <label for="planned_start_date">Planned Start Date</label>
-                <input type="datetime-local" id="planned_start_date" name="planned_start_date"
-                    value="<?= htmlspecialchars(date('Y-m-d\TH:i', strtotime($task['planned_start_date']))) ?>"
-                    required>
+                <input type="datetime-local" id="planned_start_date" name="planned_start_date" value="<?= htmlspecialchars(date('Y-m-d\TH:i', strtotime($task['planned_start_date']))) ?>" required>
             </div>
             <div class="form-group">
                 <label for="planned_finish_date">Planned Finish Date</label>
-                <input type="datetime-local" id="planned_finish_date" name="planned_finish_date"
-                    value="<?= htmlspecialchars(date('Y-m-d\TH:i', strtotime($task['planned_finish_date']))) ?>"
-                    required>
+                <input type="datetime-local" id="planned_finish_date" name="planned_finish_date" value="<?= htmlspecialchars(date('Y-m-d\TH:i', strtotime($task['planned_finish_date']))) ?>" required>
+            </div>
+            <div class="form-group">
+                <label for="user_id">Assign to:</label>
+                <select id="user_id" name="user_id" required>
+                    <option value="">Select a user</option>
+                    <?php
+                    $usersStmt = $pdo->query("
+                        SELECT u.id, u.username, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role 
+                        FROM users u
+                        JOIN user_departments ud ON u.id = ud.user_id
+                        JOIN departments d ON ud.department_id = d.id
+                        JOIN roles r ON u.role_id = r.id
+                        WHERE r.name != 'Admin'
+                        GROUP BY u.id
+                    ");
+                    $users = $usersStmt->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($users as $user): ?>
+                        <option value="<?= $user['id'] ?>" 
+                            <?php if ($user['id'] == $task['user_id']) echo 'selected'; ?>>
+                            <?= htmlspecialchars($user['username']) ?>
+                            (<?= htmlspecialchars($user['departments']) ?> - <?= htmlspecialchars($user['role']) ?>)
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="predecessor_task_id">Predecessor Task (Optional):</label>
+                <select id="predecessor_task_id" name="predecessor_task_id" class="form-control">
+                    <option value="">Select a predecessor task</option>
+                    <?php if (!empty($predecessorTasks)): ?>
+                        <?php foreach ($predecessorTasks as $predecessorTask): ?>
+                            <option value="<?= $predecessorTask['task_id'] ?>" 
+                                <?php if ($predecessorTask['task_id'] == $task['predecessor_task_id']) echo 'selected'; ?>>
+                                <?= htmlspecialchars($predecessorTask['task_name']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <option value="" disabled>No available predecessor tasks</option>
+                    <?php endif; ?>
+                </select>
             </div>
             <button type="submit">Save Changes</button>
         </form>
         <a href="tasks.php" class="back-btn">Back</a>
     </div>
-
 </body>
 
 </html>

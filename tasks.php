@@ -225,6 +225,7 @@ function sendTaskNotification($email, $username, $project_name, $project_type, $
 }
 
 // Handle form submission for adding a task
+// Handle form submission for adding a task
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
     $project_id = isset($_POST['project_id']) ? (int) $_POST['project_id'] : null;
     $task_name = trim($_POST['task_name']);
@@ -337,6 +338,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
                     );
                 }
             }
+
+            // Log the task creation in task_timeline
+            $task_id = $stmt->insert_id;
+            $stmt = $conn->prepare("
+                INSERT INTO task_timeline (task_id, action, previous_status, new_status, changed_by_user_id)
+                VALUES (?, 'task_created', NULL, 'assigned', ?)
+            ");
+            $stmt->bind_param("ii", $task_id, $assigned_by_id);
+            $stmt->execute();
         } else {
             echo '<script>alert("Failed to add task.");</script>';
         }
@@ -1421,6 +1431,8 @@ function getWeekdayHours($start, $end)
                                                         data-bs-target="#deleteModal<?= $row['task_id'] ?>">
                                                         Delete
                                                     </button>
+                                                    <a href="#" class="btn btn-secondary view-timeline-btn"
+                                                        data-task-id="<?= $row['task_id'] ?>">View Timeline</a>
                                                 </div>
                                                 <!-- Delete Modal -->
                                                 <div class="modal fade" id="deleteModal<?= $row['task_id'] ?>" tabindex="-1"
@@ -1492,6 +1504,9 @@ function getWeekdayHours($start, $end)
                                     <?php endif; ?>
                                     <th>Created On</th>
                                     <th>Predecessor Task</th>
+                                    <?php if (hasPermission('assign_tasks')): ?>
+                                        <th>Actions</th>
+                                    <?php endif; ?>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1643,6 +1658,16 @@ function getWeekdayHours($start, $end)
                                             <?= htmlspecialchars(date("d M Y, h:i A", strtotime($row['recorded_timestamp']))) ?>
                                         </td>
                                         <td><?= htmlspecialchars($row['predecessor_task_name'] ?? 'N/A') ?></td>
+                                        <?php if ((hasPermission('update_tasks') && $row['assigned_by_id'] == $_SESSION['user_id']) || hasPermission('update_tasks_all')): ?>
+                                            <td>
+                                                <div class="button-container">
+                                                    <a href="#" class="btn btn-secondary view-timeline-btn"
+                                                        data-task-id="<?= $row['task_id'] ?>">View Timeline</a>
+                                                </div>
+                                            </td>
+                                        <?php else: ?>
+                                            <td>N/A</td>
+                                        <?php endif; ?>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -1823,6 +1848,27 @@ function getWeekdayHours($start, $end)
                                 <button type="submit" class="btn btn-primary">Reassign</button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Task Timeline Modal -->
+            <div class="modal fade" id="taskTimelineModal" tabindex="-1" aria-labelledby="taskTimelineModalLabel"
+                aria-hidden="true">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="taskTimelineModalLabel">Task Timeline</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="task-timeline-content">
+                                <!-- Task timeline content will be loaded here -->
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2438,6 +2484,31 @@ function getWeekdayHours($start, $end)
                 document.getElementById('project_name_dropdown').addEventListener('change', function () {
                     const projectId = this.value;
                     fetchPredecessorTasks(projectId);
+                });
+            </script>
+            <script>
+                $(document).ready(function () {
+                    // Handle the click event on the "View Timeline" button
+                    $(document).on('click', '.view-timeline-btn', function () {
+                        const taskId = $(this).data('task-id'); // Get the task ID from the button data attribute
+
+                        // Fetch the task timeline data using AJAX
+                        $.ajax({
+                            url: 'fetch-task-timeline.php', // Create this PHP file to fetch the task timeline data
+                            type: 'GET',
+                            data: { task_id: taskId },
+                            success: function (response) {
+                                // Display the fetched data in the modal
+                                $('#task-timeline-content').html(response);
+                                $('#taskTimelineModal').modal('show'); // Show the modal
+                            },
+                            error: function (error) {
+                                console.error('Error fetching task timeline:', error);
+                                $('#task-timeline-content').html('<p>Error loading task timeline.</p>');
+                                $('#taskTimelineModal').modal('show'); // Show the modal with error message
+                            }
+                        });
+                    });
                 });
             </script>
     </body>
