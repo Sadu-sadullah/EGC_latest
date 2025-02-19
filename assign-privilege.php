@@ -23,7 +23,7 @@ if (
 $_SESSION['last_activity'] = time();
 
 $config = include '../config.php';
-$dsn = "mysql:host=localhost;dbname=euro_login_system;charset=utf8mb4";
+$dsn = "mysql:host=localhost;dbname=new;charset=utf8mb4";
 $username = $config['dbUsername'];
 $password = $config['dbPassword'];
 
@@ -45,26 +45,25 @@ try {
 
     $roles = $pdo->query("SELECT id, name FROM roles")->fetchAll(PDO::FETCH_ASSOC);
     $modules = $pdo->query("SELECT id, name FROM modules")->fetchAll(PDO::FETCH_ASSOC);
-    // Fetch permissions with their module information
-    $permissions = $pdo->query("
-    SELECT p.id, p.name, m.name AS module_name, m.id AS module_id
-    FROM permissions p
-    JOIN role_permissions rp ON p.id = rp.permission_id
-    JOIN modules m ON rp.module_id = m.id
-    GROUP BY p.id, m.id
+
+    // Fetch all permissions with their module information
+    $allPermissions = $pdo->query("
+        SELECT p.id, p.name, m.name AS module_name, m.id AS module_id
+        FROM permissions p
+        JOIN modules m ON p.module_id = m.id
     ")->fetchAll(PDO::FETCH_ASSOC);
 
-    // Group permissions by module
-    $groupedPermissions = [];
-    foreach ($permissions as $permission) {
+    // Group all permissions by module
+    $allGroupedPermissions = [];
+    foreach ($allPermissions as $permission) {
         $moduleId = $permission['module_id'];
-        if (!isset($groupedPermissions[$moduleId])) {
-            $groupedPermissions[$moduleId] = [
+        if (!isset($allGroupedPermissions[$moduleId])) {
+            $allGroupedPermissions[$moduleId] = [
                 'module_name' => $permission['module_name'],
                 'permissions' => []
             ];
         }
-        $groupedPermissions[$moduleId]['permissions'][] = $permission;
+        $allGroupedPermissions[$moduleId]['permissions'][] = $permission;
     }
 
     $errorMsg = $_SESSION['errorMsg'] ?? "";
@@ -130,7 +129,6 @@ $stmt = $pdo->prepare("
 $stmt->bindParam(':user_id', $user_id);
 $stmt->execute();
 $user_departments = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
 
 function formatPermissionName($permissionName)
 {
@@ -465,10 +463,8 @@ function formatPermissionName($permissionName)
                                         <input type="hidden" name="module_ids[]" value="<?= $module['id'] ?>">
                                         <div class="permissions-list">
                                             <?php
-                                            // Filter permissions for this module
-                                            $modulePermissions = array_filter($permissions, function ($p) use ($module) {
-                                                return $p['module_id'] == $module['id'];
-                                            });
+                                            // Get all permissions for this module
+                                            $modulePermissions = $allGroupedPermissions[$module['id']]['permissions'] ?? [];
                                             foreach ($modulePermissions as $permission): ?>
                                                 <div class="form-check form-check-inline">
                                                     <input class="form-check-input" type="checkbox"
@@ -536,16 +532,25 @@ function formatPermissionName($permissionName)
                     // Fetch and set permissions for the selected role
                     fetch('get-role-privileges.php?role_id=' + roleId)
                         .then(function (response) {
+                            if (!response.ok) {
+                                throw new Error('Network response was not ok');
+                            }
                             return response.json();
                         })
                         .then(function (data) {
-                            data.forEach(function (privilege) {
-                                const checkbox = document.querySelector(
-                                    `input[name="permissions[${privilege.module_id}][]"][value="${privilege.permission_id}"]`
-                                );
-                                if (checkbox) {
-                                    checkbox.checked = true;
-                                }
+                            if (data.error) {
+                                console.error(data.error);
+                                return;
+                            }
+                            Object.keys(data).forEach(function (moduleId) {
+                                data[moduleId].forEach(function (permissionId) {
+                                    const checkbox = document.querySelector(
+                                        `input[name="permissions[${moduleId}][]"][value="${permissionId}"]`
+                                    );
+                                    if (checkbox) {
+                                        checkbox.checked = true;
+                                    }
+                                });
                             });
                         })
                         .catch(function (error) {
