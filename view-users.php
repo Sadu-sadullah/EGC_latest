@@ -132,35 +132,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Validate inputs
     if (empty($username) || empty($email) || empty($password) || empty($role_id) || empty($department_ids)) {
-        $errorMsg = "Please fill in all fields.";
+        $_SESSION['errorMsg'] = "Please fill in all fields.";
+        header("Location: view-users.php");
+        exit;
     } else {
+        // Manually check if username already exists
+        $checkUsernameQuery = "SELECT COUNT(*) FROM users WHERE username = ?";
+        $stmt = $pdo->prepare($checkUsernameQuery);
+        $stmt->execute([$username]);
+        $usernameExists = $stmt->fetchColumn();
+
+        if ($usernameExists > 0) {
+            $_SESSION['errorMsg'] = "This username is already taken. Please choose a different one.";
+            header("Location: view-users.php");
+            exit;
+        }
+
+        // Manually check if email already exists
+        $checkEmailQuery = "SELECT COUNT(*) FROM users WHERE email = ?";
+        $stmt = $pdo->prepare($checkEmailQuery);
+        $stmt->execute([$email]);
+        $emailExists = $stmt->fetchColumn();
+
+        if ($emailExists > 0) {
+            $_SESSION['errorMsg'] = "This email is already registered. Please use a different one.";
+            header("Location: view-users.php");
+            exit;
+        }
+
         // Hash the password
         $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
 
-        try {
-            // Insert the user into the `users` table
-            $insertUserQuery = "INSERT INTO users (username, email, password, role_id) VALUES (?, ?, ?, ?)";
-            $stmt = $pdo->prepare($insertUserQuery);
-            $stmt->execute([$username, $email, $hashedPassword, $role_id]);
+        // Proceed with insertion since username and email are unique
+        $insertUserQuery = "INSERT INTO users (username, email, password, role_id) VALUES (?, ?, ?, ?)";
+        $stmt = $pdo->prepare($insertUserQuery);
+        $stmt->execute([$username, $email, $hashedPassword, $role_id]);
 
-            // Get the last inserted user ID
-            $newUserId = $pdo->lastInsertId();
+        // Get the last inserted user ID
+        $newUserId = $pdo->lastInsertId();
 
-            // Insert the user-department relationships into the `user_departments` table
-            $insertUserDepartmentQuery = "INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)";
-            $stmt = $pdo->prepare($insertUserDepartmentQuery);
+        // Insert the user-department relationships
+        $insertUserDepartmentQuery = "INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)";
+        $stmt = $pdo->prepare($insertUserDepartmentQuery);
 
-            foreach ($department_ids as $department_id) {
-                $stmt->execute([$newUserId, intval($department_id)]);
-            }
-
-            // Set success message and refresh the page
-            $_SESSION['successMsg'] = "User created successfully.";
-            header("Location: view-users.php");
-            exit;
-        } catch (PDOException $e) {
-            $errorMsg = "Failed to create user: " . $e->getMessage();
+        foreach ($department_ids as $department_id) {
+            $stmt->execute([$newUserId, intval($department_id)]);
         }
+
+        // Set success message and redirect
+        $_SESSION['successMsg'] = "User created successfully.";
+        header("Location: view-users.php");
+        exit;
     }
 }
 ?>
@@ -533,6 +555,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <?= htmlspecialchars($_SESSION['deletionMsg']) ?>
                         </div>
                         <?php unset($_SESSION['deletionMsg']); ?>
+                    <?php endif; ?>
+
+                    <?php if (isset($_SESSION['errorMsg'])): ?>
+                        <div class="deletion-message">
+                            <?= htmlspecialchars($_SESSION['errorMsg']) ?>
+                        </div>
+                        <?php unset($_SESSION['errorMsg']); ?>
                     <?php endif; ?>
 
                     <?php if (hasPermission('read_all_users')): ?>
