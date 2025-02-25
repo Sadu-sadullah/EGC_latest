@@ -1110,18 +1110,33 @@ function getWeekdayHours($start, $end)
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="createProjectModalLabel">Create New Project</h5>
+                    <h5 class="modal-title" id="createProjectModalLabel">Manage Projects</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <form id="createProjectForm" method="POST" action="create-project.php">
+                    <form id="manageProjectForm" method="POST">
+                        <div class="form-group">
+                            <label for="existing_projects">Existing Projects:</label>
+                            <select id="existing_projects" name="existing_projects" class="form-control">
+                                <option value="">Select an existing project</option>
+                                <?php foreach ($projects as $project): ?>
+                                    <option value="<?= htmlspecialchars($project['id']) ?>">
+                                        <?= htmlspecialchars($project['project_name']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
                         <div class="form-group">
                             <label for="new_project_name">Project Name:</label>
                             <input type="text" id="new_project_name" name="new_project_name" class="form-control"
                                 required>
                         </div>
-                        <input type="hidden" name="created_by_user_id" value="<?= $user_id ?>">
+                        <input type="hidden" name="project_id" id="project_id" value="">
+                        <input type="hidden" name="action" id="project_action" value="create">
+                        <input type="hidden" name="created_by_user_id" value="<?= $user_id ?>"> <!-- Add this line -->
                         <button type="submit" class="btn btn-primary">Create Project</button>
+                        <button type="button" class="btn btn-warning" onclick="editProject()">Edit Project</button>
+                        <button type="button" class="btn btn-danger" onclick="deleteProject()">Delete Project</button>
                     </form>
                 </div>
             </div>
@@ -2509,6 +2524,92 @@ function getWeekdayHours($start, $end)
                             }
                         });
                     });
+                });
+            </script>
+            <script>
+                function editProject() {
+                    const projectId = document.getElementById('existing_projects').value;
+                    if (!projectId) {
+                        alert('Please select a project to edit.');
+                        return;
+                    }
+
+                    // Fetch project details for editing
+                    fetch('get-project-details.php', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: `project_id=${projectId}`
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                document.getElementById('new_project_name').value = data.project_name;
+                                document.getElementById('project_id').value = projectId;
+                                document.getElementById('project_action').value = 'edit';
+                            } else {
+                                alert(data.message);
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error fetching project details:', error);
+                            alert('Error fetching project details.');
+                        });
+                }
+
+                function deleteProject() {
+                    const projectId = document.getElementById('existing_projects').value;
+                    if (!projectId) {
+                        alert('Please select a project to delete.');
+                        return;
+                    }
+
+                    if (confirm('Are you sure you want to delete this project?')) {
+                        fetch('manage-project.php', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/x-www-form-urlencoded',
+                            },
+                            body: `action=delete&project_id=${projectId}`
+                        })
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data.success) {
+                                    alert(data.message);
+                                    location.reload(); // Reload the page to update the project list
+                                } else {
+                                    alert(data.message);
+                                }
+                            })
+                            .catch(error => {
+                                console.error('Error deleting project:', error);
+                                alert('Error deleting project.');
+                            });
+                    }
+                }
+
+                document.getElementById('manageProjectForm').addEventListener('submit', function (event) {
+                    event.preventDefault();
+
+                    const formData = new FormData(this);
+                    fetch('manage-project.php', {
+                        method: 'POST',
+                        body: formData
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                alert(data.message);
+                                location.reload(); // Reload the page to update the project list
+                            } else {
+                                alert(data.message);
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error submitting form:', error);
+                            alert('Error submitting form.');
+                        });
                 });
             </script>
     </body>
