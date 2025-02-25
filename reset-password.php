@@ -1,4 +1,13 @@
 <?php
+session_start();
+// Manually include PHPMailer files
+require './PHPMailer-master/src/Exception.php';
+require './PHPMailer-master/src/PHPMailer.php';
+require './PHPMailer-master/src/SMTP.php';
+
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
+
 $config = include '../config.php';
 
 // Database connection
@@ -7,91 +16,135 @@ $dbUsername = $config['dbUsername'];
 $dbPassword = $config['dbPassword'];
 $dbName = 'new';
 
-// Establish database connection
 $conn = new mysqli($dbHost, $dbUsername, $dbPassword, $dbName);
 
-// Check connection
 if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-// Function to validate password complexity
-function validatePassword($password) {
-    // Password must contain at least one uppercase letter, one number, and one special character
-    $uppercase = preg_match('@[A-Z]@', $password);
-    $number = preg_match('@\d@', $password);
-    $specialChar = preg_match('@[^\w]@', $password); // Matches any non-word character
-
-    if (!$uppercase || !$number || !$specialChar || strlen($password) < 8) {
-        return false;
-    }
-    return true;
+if (isset($_COOKIE['user_timezone'])) {
+    $userTimeZone = $_COOKIE['user_timezone'];
+    date_default_timezone_set($userTimeZone);
+} else {
+    // Default timezone if not provided
+    date_default_timezone_set('UTC');
 }
 
-// Handle form submission
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $username = $_POST['username'];
-    $newPassword = $_POST['new_password'];
-    $confirmPassword = $_POST['confirm_password'];
+// Function to validate password complexity
+function validatePassword($password)
+{
+    $uppercase = preg_match('@[A-Z]@', $password);
+    $number = preg_match('@\d@', $password);
+    $specialChar = preg_match('@[^\w]@', $password);
+    return $uppercase && $number && $specialChar && strlen($password) >= 8;
+}
 
-    // Check if new password and confirm password match
-    if ($newPassword !== $confirmPassword) {
-        echo "<script>alert('New password and confirm password do not match.'); window.location.href = 'reset-password.php';</script>";
-        exit;
-    }
+// Handle reset request (no token in URL)
+if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_GET['token'])) {
+    $username = trim($_POST['username']);
 
-    // Validate password complexity
-    if (!validatePassword($newPassword)) {
-        echo "<script>alert('Password must contain at least one uppercase letter, one number, one special character, and be at least 8 characters long.'); window.location.href = 'reset-password.php';</script>";
-        exit;
-    }
-
-    // Fetch the current hashed password from the database for the given username
-    $stmt = $conn->prepare("SELECT password FROM users WHERE username = ?");
+    // Check if username exists
+    $stmt = $conn->prepare("SELECT email FROM users WHERE username = ?");
     $stmt->bind_param("s", $username);
     $stmt->execute();
     $result = $stmt->get_result();
-    
+
     if ($result->num_rows > 0) {
         $user = $result->fetch_assoc();
-        $currentHashedPassword = $user['password'];
+        $email = $user['email'];
 
-        // Verify that the new password is different from the current one
-        if (password_verify($newPassword, $currentHashedPassword)) {
-            // If the new password matches the old one, show an error message
-            echo "<script>alert('The new password cannot be the same as the current password.'); window.location.href = 'reset-password.php';</script>";
-            exit;
-        } else {
-            // Hash the new password
-            $newHashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
+        // Generate a unique reset token
+        $resetToken = bin2hex(random_bytes(32));
+        $expiry = date('Y-m-d H:i:s', strtotime('+1 hour'));
 
-            // Update the password in the database
-            $updateStmt = $conn->prepare("UPDATE users SET password = ? WHERE username = ?");
-            $updateStmt->bind_param("ss", $newHashedPassword, $username);
+        // Store token and expiry in database
+        $updateStmt = $conn->prepare("UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE username = ?");
+        $updateStmt->bind_param("sss", $resetToken, $expiry, $username);
+        $updateStmt->execute();
+        $updateStmt->close();
 
-            if ($updateStmt->execute()) {
-                // Redirect to the login page with success parameter
-                header("Location: portal-login.html?reset=success");
-                exit;
-            } else {
-                echo "Error updating password: " . $conn->error;
-            }
+        // Send reset email with PHPMailer
+        $mail = new PHPMailer(true);
+        try {
+            // Server settings (example using Gmail SMTP)
+            $mail->isSMTP();
+            $mail->Host = 'smtp.zoho.com';
+            $mail->SMTPAuth = true;
+            $mail->Username = $config['email_username'];
+            $mail->Password = $config['email_password'];
+            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+            $mail->Port = 587;
 
-            // Close the update statement
-            $updateStmt->close();
+            // Recipients
+            $mail->setFrom('enquiry@euroglobalconsultancy.com', 'Your App');
+            $mail->addAddress($email);
+
+            // Content
+            $resetLink = "http://localhost/Webiste_local_system_copy/reset-password.php?token=" . $resetToken;
+            $mail->isHTML(true);
+            $mail->Subject = 'Password Reset Request';
+            $mail->Body = "Hello,<br><br>Click the following link to reset your password:<br><a href='$resetLink'>$resetLink</a><br><br>This link will expire in 1 hour.<br><br>If you didn’t request this, ignore this email.";
+            $mail->AltBody = "Hello,\n\nClick the following link to reset your password:\n$resetLink\n\nThis link will expire in 1 hour.\n\nIf you didn’t request this, ignore this email.";
+
+            $mail->send();
+            $successMsg = "A password reset link has been sent to your email.";
+        } catch (Exception $e) {
+            $errorMsg = "Failed to send the reset email. Error: " . $mail->ErrorInfo;
         }
     } else {
-        echo "<script>alert('Username not found.'); window.location.href = 'reset-password.php';</script>";
+        $errorMsg = "Username not found.";
     }
-
-    // Close the statement and connection
     $stmt->close();
-    $conn->close();
 }
+
+// Handle reset form submission (token in URL)
+elseif ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_GET['token'])) {
+    $token = $_GET['token'];
+    $newPassword = $_POST['new_password'];
+    $confirmPassword = $_POST['confirm_password'];
+
+    if ($newPassword !== $confirmPassword) {
+        $errorMsg = "New password and confirm password do not match.";
+    } elseif (!validatePassword($newPassword)) {
+        $errorMsg = "Password must contain at least one uppercase letter, one number, one special character, and be at least 8 characters long.";
+    } else {
+        $stmt = $conn->prepare("SELECT username, password FROM users WHERE reset_token = ? AND reset_token_expiry > NOW()");
+        $stmt->bind_param("s", $token);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        if ($result->num_rows > 0) {
+            $user = $result->fetch_assoc();
+            $username = $user['username'];
+            $currentHashedPassword = $user['password'];
+
+            if (password_verify($newPassword, $currentHashedPassword)) {
+                $errorMsg = "The new password cannot be the same as the current password.";
+            } else {
+                $newHashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
+                $updateStmt = $conn->prepare("UPDATE users SET password = ?, reset_token = NULL, reset_token_expiry = NULL WHERE username = ?");
+                $updateStmt->bind_param("ss", $newHashedPassword, $username);
+                if ($updateStmt->execute()) {
+                    header("Location: portal-login.html?reset=success");
+                    exit;
+                } else {
+                    $errorMsg = "Error updating password: " . $conn->error;
+                }
+                $updateStmt->close();
+            }
+        } else {
+            $errorMsg = "Invalid or expired reset link.";
+        }
+        $stmt->close();
+    }
+}
+
+$conn->close();
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -125,7 +178,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             flex-direction: column;
         }
 
-        input[type="text"], input[type="password"] {
+        input[type="text"],
+        input[type="password"] {
             margin-bottom: 15px;
             padding: 10px;
             font-size: 16px;
@@ -147,6 +201,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         .message {
             text-align: center;
+        }
+
+        .error {
             color: #d9534f;
         }
 
@@ -155,25 +212,60 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     </style>
 </head>
+
 <body>
+    <div class="form-container">
+        <h2><?php echo isset($_GET['token']) ? 'Set New Password' : 'Reset Password'; ?></h2>
 
-<div class="form-container">
-    <h2>Reset Password</h2>
+        <?php if (isset($errorMsg)): ?>
+            <p class="message error"><?= htmlspecialchars($errorMsg) ?></p>
+        <?php endif; ?>
+        <?php if (isset($successMsg)): ?>
+            <p class="message success"><?= htmlspecialchars($successMsg) ?></p>
+        <?php endif; ?>
 
-    <!-- Display message -->
-    <?php if (!empty($message)) : ?>
-        <p class="message <?php echo (strpos($message, 'successfully') !== false) ? 'success' : ''; ?>">
-            <?php echo htmlspecialchars($message); ?>
-        </p>
-    <?php endif; ?>
+        <?php if (isset($_GET['token'])): ?>
+            <form action="reset-password.php?token=<?= htmlspecialchars($_GET['token']) ?>" method="post">
+                <input type="password" name="new_password" placeholder="Enter new password" required>
+                <input type="password" name="confirm_password" placeholder="Confirm new password" required>
+                <button type="submit">Reset Password</button>
+            </form>
+        <?php else: ?>
+            <form action="reset-password.php" method="post">
+                <input type="text" name="username" placeholder="Enter your username" required>
+                <button type="submit">Request Password Reset</button>
+            </form>
+        <?php endif; ?>
+    </div>
 
-    <form action="reset-password.php" method="post">
-        <input type="text" name="username" placeholder="Enter your username" required>
-        <input type="password" name="new_password" placeholder="Enter new password" required>
-        <input type="password" name="confirm_password" placeholder="Confirm new password" required>
-        <button type="submit">Reset Password</button>
-    </form>
-</div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            function convertUTCTimeToLocal() {
+                const timestampCells = document.querySelectorAll('td[data-utc]');
 
+                timestampCells.forEach(cell => {
+                    const utcTimestamp = cell.getAttribute('data-utc'); // Get the UTC timestamp
+
+                    const options = {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: true,
+                        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone // Use the user's timezone
+                    };
+
+                    const localTime = new Date(utcTimestamp).toLocaleString('en-US', options);
+
+                    // Update the cell content with the local time
+                    cell.textContent = localTime;
+                });
+            }
+
+            convertUTCTimeToLocal();
+        });
+    </script>
 </body>
+
 </html>
