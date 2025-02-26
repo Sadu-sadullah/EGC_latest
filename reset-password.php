@@ -22,12 +22,14 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
+// Determine user's timezone
+$userTimeZone = null;
 if (isset($_COOKIE['user_timezone'])) {
     $userTimeZone = $_COOKIE['user_timezone'];
-    date_default_timezone_set($userTimeZone);
+    date_default_timezone_set($userTimeZone); // Set PHP to user's timezone
 } else {
-    // Default timezone if not provided
-    date_default_timezone_set('UTC');
+    // If no cookie, default to a common timezone or detect via JavaScript (handled later in HTML)
+    date_default_timezone_set('UTC'); // Default to UTC as fallback
 }
 
 // Function to validate password complexity
@@ -55,9 +57,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_GET['token'])) {
 
         // Generate a unique reset token
         $resetToken = bin2hex(random_bytes(32));
-        $expiry = date('Y-m-d H:i:s', strtotime('+1 hour'));
+        $expiry = date('Y-m-d H:i:s', strtotime('+1 hour')); // Use user's timezone for expiry
 
-        // Store token and expiry in database
+        // Store token and expiry in database using user's local timezone
         $updateStmt = $conn->prepare("UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE username = ?");
         $updateStmt->bind_param("sss", $resetToken, $expiry, $username);
         $updateStmt->execute();
@@ -66,7 +68,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_GET['token'])) {
         // Send reset email with PHPMailer
         $mail = new PHPMailer(true);
         try {
-            // Server settings (example using Gmail SMTP)
+            // Server settings (using Zoho SMTP)
             $mail->isSMTP();
             $mail->Host = 'smtp.zoho.com';
             $mail->SMTPAuth = true;
@@ -76,15 +78,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_GET['token'])) {
             $mail->Port = 587;
 
             // Recipients
-            $mail->setFrom('enquiry@euroglobalconsultancy.com', 'Your App');
+            $mail->setFrom('enquiry@euroglobalconsultancy.com', 'Task Management System Password Reset');
             $mail->addAddress($email);
 
             // Content
-            $resetLink = "http://localhost/Webiste_local_system_copy/reset-password.php?token=" . $resetToken;
+            $resetLink = "http://euroglobalconsultancy.com/reset-password.php?token=" . $resetToken;
             $mail->isHTML(true);
             $mail->Subject = 'Password Reset Request';
-            $mail->Body = "Hello,<br><br>Click the following link to reset your password:<br><a href='$resetLink'>$resetLink</a><br><br>This link will expire in 1 hour.<br><br>If you didn’t request this, ignore this email.";
-            $mail->AltBody = "Hello,\n\nClick the following link to reset your password:\n$resetLink\n\nThis link will expire in 1 hour.\n\nIf you didn’t request this, ignore this email.";
+            $mail->Body = "Hello,<br><br>Click the following link to reset your password:<br><a href='$resetLink'>$resetLink</a><br><br>This link will expire in 1 hour in your local time (" . date('T') . ").<br><br>If you didn’t request this, ignore this email.";
+            $mail->AltBody = "Hello,\n\nClick the following link to reset your password:\n$resetLink\n\nThis link will expire in 1 hour in your local time (" . date('T') . ").\n\nIf you didn’t request this, ignore this email.";
 
             $mail->send();
             $successMsg = "A password reset link has been sent to your email.";
@@ -236,36 +238,24 @@ $conn->close();
                 <button type="submit">Request Password Reset</button>
             </form>
         <?php endif; ?>
+
+        <!-- JavaScript to set timezone cookie if not already set -->
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                function setUserTimezone() {
+                    const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                    if (!document.cookie.match(/user_timezone=([^;]+)/)) {
+                        // Set cookie if not already set, expires in 30 days
+                        document.cookie = `user_timezone=${encodeURIComponent(userTimeZone)}; path=/; max-age=2592000`;
+                    }
+                    console.log('User Timezone:', userTimeZone);
+                    console.log('Cookie Timezone:', document.cookie.match(/user_timezone=([^;]+)/)?.[1] || 'Not set');
+                }
+
+                setUserTimezone();
+            });
+        </script>
     </div>
-
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            function convertUTCTimeToLocal() {
-                const timestampCells = document.querySelectorAll('td[data-utc]');
-
-                timestampCells.forEach(cell => {
-                    const utcTimestamp = cell.getAttribute('data-utc'); // Get the UTC timestamp
-
-                    const options = {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        hour12: true,
-                        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone // Use the user's timezone
-                    };
-
-                    const localTime = new Date(utcTimestamp).toLocaleString('en-US', options);
-
-                    // Update the cell content with the local time
-                    cell.textContent = localTime;
-                });
-            }
-
-            convertUTCTimeToLocal();
-        });
-    </script>
 </body>
 
 </html>

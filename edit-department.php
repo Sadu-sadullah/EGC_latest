@@ -13,7 +13,7 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['role'] !== 'Admin') {
 }
 
 $config = include '../config.php';
-$dsn = "mysql:host=localhost;dbname=new;charset=utf8mb4";
+$dsn = "mysql:host=localhost;dbname=euro_new;charset=utf8mb4";
 $username = $config['dbUsername'];
 $password = $config['dbPassword'];
 
