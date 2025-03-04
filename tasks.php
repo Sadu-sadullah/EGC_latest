@@ -1503,7 +1503,7 @@ function getWeekdayHours($start, $end)
                             id="remaining-tasks">
                             <thead>
                                 <tr class="align-middle">
-                                    <th>#</th> <!-- New column for task count -->
+                                    <th>#</th>
                                     <th>Project Name</th>
                                     <th>Task Name</th>
                                     <th>Task Description</th>
@@ -1527,20 +1527,24 @@ function getWeekdayHours($start, $end)
                             <tbody>
                                 <?php
                                 $taskCountStart = 1;
-                                foreach ($completedTasks as $row): ?>
+                                foreach ($completedTasks as $row):
+                                    $isClosedFromCompletedOnTime = $row['status'] === 'Closed' && $row['completion_description'] && !$row['delayed_reason'];
+                                    $isClosedFromDelayedCompletion = $row['status'] === 'Closed' && $row['delayed_reason'];
+                                    ?>
                                     <tr data-project="<?= htmlspecialchars($row['project_name']) ?>"
-                                        data-status="<?= htmlspecialchars($row['status']) ?>" class="align-middle <?php if ($row['status'] === 'Delayed Completion')
-                                              echo 'delayed-task'; ?>">
-                                        <td><?= $taskCountStart++ ?></td> <!-- Display task count and increment -->
+                                        data-status="<?= htmlspecialchars($row['status']) ?>"
+                                        class="align-middle <?php if ($row['status'] === 'Delayed Completion' || $isClosedFromDelayedCompletion)
+                                            echo 'delayed-task'; ?>">
+                                        <td><?= $taskCountStart++ ?></td>
                                         <td><?= htmlspecialchars($row['project_name']) ?></td>
                                         <td>
-                                            <?php if ($row['status'] === 'Completed on Time'): ?>
+                                            <?php if ($row['status'] === 'Completed on Time' || $isClosedFromCompletedOnTime): ?>
                                                 <!-- Link to Completed on Time Modal -->
                                                 <a href="#" data-bs-toggle="modal" data-bs-target="#viewDescriptionModal"
                                                     data-description="<?= htmlspecialchars($row['completion_description']); ?>">
                                                     <?= htmlspecialchars($row['task_name']); ?>
                                                 </a>
-                                            <?php elseif ($row['status'] === 'Delayed Completion'): ?>
+                                            <?php elseif ($row['status'] === 'Delayed Completion' || $isClosedFromDelayedCompletion): ?>
                                                 <!-- Link to Delayed Completion Modal -->
                                                 <a href="#" data-bs-toggle="modal" data-bs-target="#delayedCompletionModal"
                                                     onclick="showDelayedDetails('<?php echo htmlspecialchars($row['task_name']); ?>', '<?php echo htmlspecialchars($row['task_actual_finish_date']); ?>', '<?php echo htmlspecialchars($row['delayed_reason']); ?>', '<?php echo htmlspecialchars($row['completion_description']); ?>')">
@@ -1564,11 +1568,9 @@ function getWeekdayHours($start, $end)
                                                 </a>
                                             </div>
                                         </td>
-                                        <td>
-                                            <?= htmlspecialchars(date("d M Y, h:i A", strtotime($row['planned_start_date']))) ?>
+                                        <td><?= htmlspecialchars(date("d M Y, h:i A", strtotime($row['planned_start_date']))) ?>
                                         </td>
-                                        <td>
-                                            <?= htmlspecialchars(date("d M Y, h:i A", strtotime($row['planned_finish_date']))) ?>
+                                        <td><?= htmlspecialchars(date("d M Y, h:i A", strtotime($row['planned_finish_date']))) ?>
                                         </td>
                                         <td>
                                             <?= $row['actual_start_date'] ? htmlspecialchars(date("d M Y, h:i A", strtotime($row['actual_start_date']))) : 'N/A' ?>
@@ -1584,22 +1586,16 @@ function getWeekdayHours($start, $end)
                                             <form method="POST" action="update-status.php">
                                                 <input type="hidden" name="task_id" value="<?= $row['task_id'] ?>">
                                                 <?php
-                                                // Fetch the current status of the task
                                                 $currentStatus = $row['status'];
-
-                                                // Fetch the assigned_by_id for the task
                                                 $assigned_by_id = $row['assigned_by_id'];
 
-                                                // Define the available statuses based on the user role and current status
                                                 $statuses = [];
                                                 if (hasPermission('status_change_main') || $assigned_by_id == $user_id) {
-                                                    // Admin or the user who assigned the task can change status to "Closed"
                                                     if (in_array($currentStatus, ['Completed on Time', 'Delayed Completion'])) {
                                                         $statuses = ['Closed'];
                                                     }
                                                 }
 
-                                                // Generate the status dropdown or display the status as text
                                                 if (!empty($statuses)) {
                                                     echo '<select id="status" name="status" onchange="handleStatusChange(event, ' . $row['task_id'] . ')">';
                                                     if (!in_array($currentStatus, $statuses)) {
@@ -1611,36 +1607,31 @@ function getWeekdayHours($start, $end)
                                                     }
                                                     echo '</select>';
                                                 } else {
-                                                    // Display the status as plain text if the user is not allowed to change it
                                                     echo $currentStatus;
                                                 }
 
-                                                // Show delay information for delayed completion
-                                                if ($currentStatus === 'Delayed Completion') {
+                                                // Show delay information for Delayed Completion or Closed from Delayed Completion
+                                                if ($row['status'] === 'Delayed Completion' || $isClosedFromDelayedCompletion) {
                                                     $plannedStartDate = strtotime($row['planned_start_date']);
                                                     $plannedFinishDate = strtotime($row['planned_finish_date']);
 
-                                                    // Ensure planned finish date is after planned start date
                                                     if ($plannedFinishDate < $plannedStartDate) {
                                                         $plannedFinishDate += 86400; // Add 24 hours to correct AM/PM crossing
                                                     }
 
-                                                    // Calculate planned duration
                                                     $plannedDuration = $plannedFinishDate - $plannedStartDate;
 
                                                     if (!empty($row['actual_start_date']) && !empty($row['task_actual_finish_date'])) {
                                                         $actualStartDate = strtotime($row['actual_start_date']);
                                                         $actualFinishDate = strtotime($row['task_actual_finish_date']);
 
-                                                        // Ensure actual finish date is after actual start date
                                                         if ($actualFinishDate < $actualStartDate) {
                                                             $actualFinishDate += 86400; // Add 24 hours if needed
                                                         }
 
-                                                        // Calculate actual duration
                                                         $actualDuration = $actualFinishDate - $actualStartDate;
-                                                        $delaySeconds = max(0, $actualDuration - $plannedDuration); // Prevent negative delays
-                                            
+                                                        $delaySeconds = max(0, $actualDuration - $plannedDuration);
+
                                                         if ($delaySeconds > 0) {
                                                             $delayDays = floor($delaySeconds / (60 * 60 * 24));
                                                             $delayHours = floor(($delaySeconds % (60 * 60 * 24)) / (60 * 60));

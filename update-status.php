@@ -39,14 +39,6 @@ $dbUsername = $config['dbUsername'] ?? null;
 $dbPassword = $config['dbPassword'] ?? null;
 $dbName = 'new';
 
-// Check if database credentials exist
-// if (!$dbUsername || !$dbPassword) {
-//     echo json_encode(['success' => false, 'message' => 'Database credentials missing.']);
-//     exit;
-// }
-
-include 'permissions.php';
-
 // DSN for PDO
 $dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8";
 
@@ -58,6 +50,8 @@ try {
     echo json_encode(['success' => false, 'message' => 'Database connection failed: ' . $e->getMessage()]);
     exit;
 }
+
+include 'permissions.php';
 
 try {
     // Validate user input
@@ -73,7 +67,7 @@ try {
     }
 
     // Fetch the current task details
-    $stmt = $pdo->prepare("SELECT status, assigned_by_id, user_id, task_name, predecessor_task_id FROM tasks WHERE task_id = ?");
+    $stmt = $pdo->prepare("SELECT status, assigned_by_id, user_id, task_name, predecessor_task_id, completion_description, actual_finish_date FROM tasks WHERE task_id = ?");
     $stmt->execute([$task_id]);
     $task = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -87,6 +81,8 @@ try {
     $assigned_user_id = $task['user_id'];
     $task_name = $task['task_name'];
     $predecessor_task_id = $task['predecessor_task_id'];
+    $existing_completion_description = $task['completion_description'];
+    $existing_actual_finish_date = $task['actual_finish_date'];
 
     // Define status categories
     $assignerStatuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
@@ -111,18 +107,17 @@ try {
     if (hasPermission('status_change_main') || ($assigned_by_id == $user_id && !$isSelfAssigned)) {
         if (in_array($current_status, $assignerStatuses)) {
             $statuses = $assignerStatuses;
+        } elseif (in_array($current_status, ['Completed on Time', 'Delayed Completion'])) {
+            $statuses = ['Closed']; // Allow transition to Closed from completed states
         }
     }
 
     // Logic for self-assigned users with status_change_normal
     if ($isSelfAssigned && hasPermission('status_change_normal')) {
         $statuses = $assignerStatuses; // Start with assigner statuses
-
         if (isset($normalUserStatuses[$current_status])) {
-            // Merge in the statuses that a normal assigned user would get
             $statuses = array_merge($statuses, $normalUserStatuses[$current_status]);
         } else {
-            // Allow all default statuses from both assigner and normal user logic
             if (in_array($current_status, $allowedStatuses)) {
                 $statuses = $allowedStatuses;
             }
@@ -174,6 +169,18 @@ try {
             $sql = "INSERT INTO task_transactions (task_id, delayed_reason, actual_finish_date) VALUES (?, ?, NOW())";
             $stmt = $pdo->prepare($sql);
             $stmt->execute([$task_id, $delayed_reason]);
+        }
+    } elseif ($new_status === 'Closed') {
+        // For "Closed," only update the status; retain existing completion_description and actual_finish_date
+        $sql = "UPDATE tasks SET status = ? WHERE task_id = ?";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$new_status, $task_id]);
+
+        // If the task was "Delayed Completion," ensure delayed_reason persists by fetching it from task_transactions
+        if ($current_status === 'Delayed Completion') {
+            $delayStmt = $pdo->prepare("SELECT delayed_reason FROM task_transactions WHERE task_id = ? ORDER BY actual_finish_date DESC LIMIT 1");
+            $delayStmt->execute([$task_id]);
+            $delayed_reason = $delayStmt->fetchColumn();
         }
     } else {
         $sql = "UPDATE tasks SET status = ? WHERE task_id = ?";
