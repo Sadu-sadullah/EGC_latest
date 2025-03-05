@@ -1442,12 +1442,46 @@ function getWeekdayHours($start, $end)
                                                             Date</button>
                                                     <?php endif; ?>
                                                 </div>
-                                                <!-- Delete Modal (unchanged) -->
+
+                                                <!-- Delete Modal -->
                                                 <div class="modal fade" id="deleteModal<?= $row['task_id'] ?>" tabindex="-1"
-                                                    aria-labelledby="deleteModalLabel" aria-hidden="true">
-                                                    <!-- Existing delete modal content -->
+                                                    aria-labelledby="deleteModalLabel<?= $row['task_id'] ?>" aria-hidden="true">
+                                                    <div class="modal-dialog">
+                                                        <div class="modal-content">
+                                                            <div class="modal-header">
+                                                                <h5 class="modal-title"
+                                                                    id="deleteModalLabel<?= $row['task_id'] ?>">Delete Task</h5>
+                                                                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                                                    aria-label="Close"></button>
+                                                            </div>
+                                                            <div class="modal-body">
+                                                                <p>Are you sure you want to delete the task
+                                                                    "<strong><?= htmlspecialchars($row['task_name']) ?></strong>"?
+                                                                </p>
+                                                                <form id="deleteForm<?= $row['task_id'] ?>" method="POST"
+                                                                    action="delete-task.php">
+                                                                    <input type="hidden" name="task_id"
+                                                                        value="<?= $row['task_id'] ?>">
+                                                                    <div class="mb-3">
+                                                                        <label for="reason<?= $row['task_id'] ?>"
+                                                                            class="form-label">Reason for Deletion</label>
+                                                                        <textarea class="form-control"
+                                                                            id="reason<?= $row['task_id'] ?>" name="reason"
+                                                                            rows="3" required></textarea>
+                                                                    </div>
+                                                                </form>
+                                                            </div>
+                                                            <div class="modal-footer">
+                                                                <button type="button" class="btn btn-secondary"
+                                                                    data-bs-dismiss="modal">Cancel</button>
+                                                                <button type="submit" class="btn btn-danger"
+                                                                    form="deleteForm<?= $row['task_id'] ?>">Delete</button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                                <!-- New Edit Start Date Modal -->
+
+                                                <!-- Edit Start Date Modal (unchanged, kept for context) -->
                                                 <?php if (hasPermission('status_change_main') && $row['actual_start_date']): ?>
                                                     <div class="modal fade" id="editStartDateModal<?= $row['task_id'] ?>"
                                                         tabindex="-1" aria-labelledby="editStartDateModalLabel" aria-hidden="true">
@@ -1466,7 +1500,6 @@ function getWeekdayHours($start, $end)
                                                                             value="<?= $row['task_id'] ?>">
                                                                         <input type="hidden" name="status"
                                                                             value="<?= $row['status'] ?>">
-                                                                        <!-- Preserve current status -->
                                                                         <div class="mb-3">
                                                                             <label for="actual_start_date" class="form-label">Actual
                                                                                 Start Date:</label>
@@ -1484,7 +1517,7 @@ function getWeekdayHours($start, $end)
                                                 <?php endif; ?>
                                             </td>
                                         <?php else: ?>
-
+                                            <td>N/A</td>
                                         <?php endif; ?>
                                     </tr>
                                 <?php endforeach; ?>
@@ -1882,6 +1915,54 @@ function getWeekdayHours($start, $end)
                 </div>
             </div>
 
+            <!-- Modal for Closing Task Verification -->
+            <div class="modal fade" id="closeTaskModal" tabindex="-1" aria-labelledby="closeTaskModalLabel"
+                aria-hidden="true">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <form id="closeTaskForm" method="POST" onsubmit="handleCloseTaskForm(event)">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="closeTaskModalLabel">Verify Task Closure</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                    aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <input type="hidden" id="close-task-id" name="task_id">
+                                <input type="hidden" id="close-status" name="status" value="Closed">
+
+                                <p><strong>Task Name:</strong> <span id="close-task-name"></span></p>
+                                <p><strong>Planned Start Date:</strong> <span id="close-planned-start"></span></p>
+                                <p><strong>Planned End Date:</strong> <span id="close-planned-end"></span></p>
+                                <p><strong>Actual Start Date:</strong> <span id="close-actual-start"></span></p>
+                                <p><strong>Actual End Date:</strong> <span id="close-actual-end"></span></p>
+                                <p><strong>Planned Duration:</strong> <span id="close-planned-duration"></span></p>
+                                <p><strong>Actual Duration:</strong> <span id="close-actual-duration"></span></p>
+                                <p id="close-delayed-reason-container" style="display: none;">
+                                    <strong>Delayed Reason:</strong> <span id="close-delayed-reason"></span>
+                                </p>
+
+                                <!-- Verification Option -->
+                                <div class="mb-3">
+                                    <label for="close-verification" class="form-label">Verify Completion Status:</label>
+                                    <select id="close-verification" name="verified_status" class="form-control"
+                                        required>
+                                        <option value="">Select an option</option>
+                                        <option value="Completed on Time">Completed on Time</option>
+                                        <option value="Delayed Completion">Delayed Completion</option>
+                                    </select>
+                                    <small class="form-text text-muted">If "Completed on Time" is selected and a delayed
+                                        reason exists, it will be removed.</small>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                <button type="submit" class="btn btn-primary">Confirm Closure</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
             <!-- Jquery -->
             <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 
@@ -1949,11 +2030,10 @@ function getWeekdayHours($start, $end)
                     const form = event.target.form;
 
                     // Fetch the predecessor task ID from the table row
-                    const row = $(`#pending-tasks tr[data-task-id="${taskId}"]`);
+                    const row = $(`#pending-tasks tr[data-task-id="${taskId}"], #remaining-tasks tr[data-task-id="${taskId}"]`);
                     const predecessorTaskId = row.data('predecessor-task-id') || null;
-                    let predecessorTaskName = row.find('td:eq(12)').text().trim(); // Predecessor Task column
+                    let predecessorTaskName = row.find('td:eq(13)').text().trim(); // Adjust column index if needed
 
-                    // Log for debugging
                     console.log("Task ID:", taskId);
                     console.log("Predecessor Task ID:", predecessorTaskId);
                     console.log("Predecessor Task Name (from table):", predecessorTaskName);
@@ -1963,11 +2043,11 @@ function getWeekdayHours($start, $end)
                         const reassignmentModal = new bootstrap.Modal(document.getElementById('reassignmentModal'));
                         reassignmentModal.show();
                     } else if (status === 'Delayed Completion' || status === 'Completed on Time') {
+                        // Existing logic for completion modal
                         document.getElementById('task-id').value = taskId;
                         document.getElementById('modal-status').value = status;
                         document.getElementById('predecessor-task-id').value = predecessorTaskId;
 
-                        // If predecessorTaskId exists but name is 'N/A', fetch it dynamically
                         if (predecessorTaskId && (!predecessorTaskName || predecessorTaskName === 'N/A')) {
                             fetch(`fetch-predecessor-task-name.php?task_id=${predecessorTaskId}`)
                                 .then(response => response.json())
@@ -1992,6 +2072,9 @@ function getWeekdayHours($start, $end)
                         }
                         const completionModal = new bootstrap.Modal(document.getElementById('completionModal'));
                         completionModal.show();
+                    } else if (status === 'Closed') {
+                        // Fetch task details and show the close task modal
+                        fetchTaskDetailsForClosure(taskId);
                     } else {
                         fetch('update-status.php', {
                             method: 'POST',
@@ -2016,6 +2099,84 @@ function getWeekdayHours($start, $end)
                                 alert('An error occurred while updating the status.');
                             });
                     }
+                }
+
+                // Function to fetch task details and populate the close task modal
+                function fetchTaskDetailsForClosure(taskId) {
+                    fetch(`fetch-task-details.php?task_id=${taskId}`, {
+                        method: 'GET'
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                // Populate the modal with task details
+                                document.getElementById('close-task-id').value = taskId;
+                                document.getElementById('close-task-name').innerText = data.task_name;
+                                document.getElementById('close-planned-start').innerText = data.planned_start_date;
+                                document.getElementById('close-planned-end').innerText = data.planned_finish_date;
+                                document.getElementById('close-actual-start').innerText = data.actual_start_date || 'N/A';
+                                document.getElementById('close-actual-end').innerText = data.actual_finish_date || 'N/A';
+                                document.getElementById('close-planned-duration').innerText = data.planned_duration;
+                                document.getElementById('close-actual-duration').innerText = data.actual_duration || 'N/A';
+
+                                const delayedReasonContainer = document.getElementById('close-delayed-reason-container');
+                                const delayedReason = document.getElementById('close-delayed-reason');
+                                if (data.delayed_reason) {
+                                    delayedReason.innerText = data.delayed_reason;
+                                    delayedReasonContainer.style.display = 'block';
+                                } else {
+                                    delayedReasonContainer.style.display = 'none';
+                                }
+
+                                // Set default verification status
+                                document.getElementById('close-verification').value = data.current_status;
+
+                                // Show the modal
+                                const closeTaskModal = new bootstrap.Modal(document.getElementById('closeTaskModal'));
+                                closeTaskModal.show();
+                            } else {
+                                alert(data.message);
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error fetching task details:', error);
+                            alert('An error occurred while fetching task details.');
+                        });
+                }
+
+                // Handle the close task form submission
+                function handleCloseTaskForm(event) {
+                    event.preventDefault();
+
+                    const form = event.target;
+                    const formData = new FormData(form);
+
+                    fetch('update-status.php', {
+                        method: 'POST',
+                        body: formData
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                const closeTaskModal = bootstrap.Modal.getInstance(document.getElementById('closeTaskModal'));
+                                closeTaskModal.hide();
+
+                                document.getElementById('success-task-name').innerText = data.task_name;
+                                document.getElementById('success-message').innerText = data.message;
+                                const successModal = new bootstrap.Modal(document.getElementById('successModal'));
+                                successModal.show();
+
+                                setTimeout(() => {
+                                    window.location.reload();
+                                }, 2000);
+                            } else {
+                                alert(data.message);
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            alert('An error occurred while closing the task.');
+                        });
                 }
 
                 function showPredecessorSection(predecessorTaskId, predecessorTaskName) {
@@ -2378,7 +2539,7 @@ function getWeekdayHours($start, $end)
 
             <script>
                 document.addEventListener('DOMContentLoaded', function () {
-                    // Select all delete buttons
+                    // Ensure all delete buttons trigger their modals correctly
                     const deleteButtons = document.querySelectorAll('.btn-danger[data-bs-toggle="modal"]');
                     deleteButtons.forEach(button => {
                         button.addEventListener('click', function () {
@@ -2387,13 +2548,14 @@ function getWeekdayHours($start, $end)
 
                             if (targetModal) {
                                 console.log(`Opening modal: ${targetModalId}`);
-                                // Modal opens automatically due to Bootstrap behavior
+                                const modal = new bootstrap.Modal(targetModal);
+                                modal.show(); // Explicitly show the modal
                             } else {
                                 console.error(`Modal not found: ${targetModalId}`);
                             }
                         });
                     });
-                }); 
+                });
             </script>
             <!-- To check if task desc is more than 2 lines -->
             <script>

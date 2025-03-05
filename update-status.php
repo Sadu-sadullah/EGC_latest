@@ -12,7 +12,7 @@ session_start();
 
 // Check if the user is logged in
 if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
-    ob_end_clean(); // Clear buffer before output
+    ob_end_clean();
     echo json_encode(['success' => false, 'message' => 'Unauthorized access.']);
     exit;
 }
@@ -63,6 +63,7 @@ try {
     $new_status = $_POST['status'] ?? null;
     $completion_description = $_POST['completion_description'] ?? null;
     $delayed_reason = $_POST['delayed_reason'] ?? null;
+    $verified_status = $_POST['verified_status'] ?? null; // New input from close task modal
 
     if (!$task_id || !$new_status) {
         ob_end_clean();
@@ -70,7 +71,7 @@ try {
         exit;
     }
 
-    // Fetch the current task details (ensure actual_start_date is included)
+    // Fetch the current task details
     $stmt = $pdo->prepare("SELECT status, assigned_by_id, user_id, task_name, predecessor_task_id, completion_description, actual_finish_date, actual_start_date FROM tasks WHERE task_id = ?");
     $stmt->execute([$task_id]);
     $task = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -88,7 +89,7 @@ try {
     $predecessor_task_id = $task['predecessor_task_id'];
     $existing_completion_description = $task['completion_description'];
     $existing_actual_finish_date = $task['actual_finish_date'];
-    $actual_start_date = $task['actual_start_date']; // Ensure this is fetched
+    $actual_start_date = $task['actual_start_date'];
 
     // Define status categories
     $assignerStatuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
@@ -180,9 +181,26 @@ try {
             $stmt->execute([$task_id, $delayed_reason]);
         }
     } elseif ($new_status === 'Closed') {
-        $sql = "UPDATE tasks SET status = ? WHERE task_id = ?";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([$new_status, $task_id]);
+        // Handle closure with verification
+        if ($verified_status === 'Completed on Time' && $current_status === 'Delayed Completion') {
+            // Update status to Closed and remove delayed reason
+            $sql = "UPDATE tasks SET status = ? WHERE task_id = ?";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$new_status, $task_id]);
+
+            $deleteStmt = $pdo->prepare("DELETE FROM task_transactions WHERE task_id = ?");
+            $deleteStmt->execute([$task_id]);
+        } elseif ($verified_status === 'Delayed Completion' || $current_status === 'Delayed Completion') {
+            // Keep delayed reason and update status to Closed
+            $sql = "UPDATE tasks SET status = ? WHERE task_id = ?";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$new_status, $task_id]);
+        } else {
+            // Just close the task (no delayed reason to remove)
+            $sql = "UPDATE tasks SET status = ? WHERE task_id = ?";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$new_status, $task_id]);
+        }
 
         if ($current_status === 'Delayed Completion') {
             $delayStmt = $pdo->prepare("SELECT delayed_reason FROM task_transactions WHERE task_id = ? ORDER BY actual_finish_date DESC LIMIT 1");

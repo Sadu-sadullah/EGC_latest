@@ -1,6 +1,12 @@
 <?php
 session_start(); // Ensure session is started
 
+// Check if the user is logged in
+if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
+    echo '<script>alert("Unauthorized access."); window.location.href = "portal-login.html";</script>';
+    exit;
+}
+
 $config = include '../config.php';
 
 // Database connection
@@ -28,44 +34,53 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         exit;
     }
 
-    // Fetch the task name before deletion using the task_id
-    $stmt = $conn->prepare("SELECT task_name FROM tasks WHERE task_id = ?");
-    $stmt->bind_param("i", $task_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
+    // Start transaction to ensure data consistency
+    $conn->begin_transaction();
 
-    if ($result->num_rows === 0) {
-        echo '<script>alert("Task not found."); window.location.href = "tasks.php";</script>';
-        exit;
+    try {
+        // Fetch the task name before deletion
+        $stmt = $conn->prepare("SELECT task_name FROM tasks WHERE task_id = ?");
+        $stmt->bind_param("i", $task_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        if ($result->num_rows === 0) {
+            throw new Exception("Task not found.");
+        }
+
+        $task = $result->fetch_assoc();
+        $task_name = $task['task_name'];
+        $stmt->close();
+
+        // Update tasks that reference this task_id as predecessor_task_id
+        $updatePredecessorStmt = $conn->prepare("UPDATE tasks SET predecessor_task_id = NULL WHERE predecessor_task_id = ?");
+        $updatePredecessorStmt->bind_param("i", $task_id);
+        $updatePredecessorStmt->execute();
+        $updatePredecessorStmt->close();
+
+        // Record the reason for deletion along with the task name and user_id
+        $stmt = $conn->prepare("INSERT INTO task_deletion_reasons (task_name, user_id, reason) VALUES (?, ?, ?)");
+        $stmt->bind_param("sis", $task_name, $_SESSION['user_id'], $reason);
+        $stmt->execute();
+        $stmt->close();
+
+        // Delete the task
+        $stmt = $conn->prepare("DELETE FROM tasks WHERE task_id = ?");
+        $stmt->bind_param("i", $task_id);
+        $stmt->execute();
+
+        if ($stmt->affected_rows > 0) {
+            $conn->commit();
+            echo '<script>alert("Task deleted successfully."); window.location.href = "tasks.php";</script>';
+        } else {
+            throw new Exception("Failed to delete task.");
+        }
+
+        $stmt->close();
+    } catch (Exception $e) {
+        $conn->rollback();
+        echo '<script>alert("' . $e->getMessage() . '"); window.location.href = "tasks.php";</script>';
     }
-
-    $task = $result->fetch_assoc();
-    $task_name = $task['task_name'];
-
-    // Update tasks that reference this task_id as predecessor_task_id
-    $updatePredecessorStmt = $conn->prepare("UPDATE tasks SET predecessor_task_id = NULL WHERE predecessor_task_id = ?");
-    $updatePredecessorStmt->bind_param("i", $task_id);
-    $updatePredecessorStmt->execute();
-    $updatePredecessorStmt->close();
-
-    // Record the reason for deletion along with the task name and user_id
-    $stmt = $conn->prepare("INSERT INTO task_deletion_reasons (task_name, user_id, reason) VALUES (?, ?, ?)");
-    $stmt->bind_param("sis", $task_name, $_SESSION['user_id'], $reason);
-    $stmt->execute();
-    $stmt->close();
-
-    // Delete the task
-    $stmt = $conn->prepare("DELETE FROM tasks WHERE task_id = ?");
-    $stmt->bind_param("i", $task_id);
-    $stmt->execute();
-
-    if ($stmt->affected_rows > 0) {
-        echo '<script>alert("Task deleted successfully."); window.location.href = "tasks.php";</script>';
-    } else {
-        echo '<script>alert("Failed to delete task."); window.location.href = "tasks.php";</script>';
-    }
-
-    $stmt->close();
 }
 
 $conn->close();
