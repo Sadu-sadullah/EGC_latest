@@ -215,7 +215,7 @@ try {
 
     // Clear buffer and send successful response
     ob_end_clean();
-    echo json_encode(['success' => true, 'message' => 'Operation completed successfully.', 'task_name' => $task_name]);
+    echo json_encode(['success' => true, 'message' => 'Status updated successfully.', 'task_name' => $task_name]);
 } catch (Exception $e) {
     ob_end_clean();
     echo json_encode(['success' => false, 'message' => 'An error occurred: ' . $e->getMessage()]);
