@@ -1428,7 +1428,7 @@ function getWeekdayHours($start, $end)
                                                     </button>
                                                     <a href="#" class="btn btn-secondary view-timeline-btn"
                                                         data-task-id="<?= $row['task_id'] ?>">View Timeline</a>
-                                                    <?php if (hasPermission('status_change_main') && $row['actual_start_date']): ?>
+                                                        <?php if ((hasPermission('status_change_main') && $row['actual_start_date']) || ($row['assigned_by_id'] == $user_id && $row['actual_start_date'])): ?>
                                                         <button type="button" class="btn btn-warning" data-bs-toggle="modal"
                                                             data-bs-target="#editStartDateModal<?= $row['task_id'] ?>">Edit Start
                                                             Date</button>
