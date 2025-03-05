@@ -400,7 +400,7 @@ if (hasPermission('view_all_tasks')) {
             tasks.recorded_timestamp DESC
     ";
 } elseif (hasPermission('view_department_tasks')) {
-    //Fetch tasks for users in the same department
+    // Fetch tasks for users in the same department
     $taskQuery = "
         SELECT 
             tasks.task_id,
@@ -416,13 +416,15 @@ if (hasPermission('view_all_tasks')) {
             tasks.recorded_timestamp,
             tasks.assigned_by_id,
             tasks.user_id,
+            tasks.predecessor_task_id, -- Add predecessor_task_id
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
             assigned_to_user.username AS assigned_to, 
             GROUP_CONCAT(DISTINCT assigned_to_department.name SEPARATOR ', ') AS assigned_to_department, 
             assigned_by_user.username AS assigned_by,
-            GROUP_CONCAT(DISTINCT assigned_by_department.name SEPARATOR ', ') AS assigned_by_department 
+            GROUP_CONCAT(DISTINCT assigned_by_department.name SEPARATOR ', ') AS assigned_by_department,
+            predecessor_task.task_name AS predecessor_task_name -- Add predecessor task name
         FROM tasks 
         LEFT JOIN task_transactions ON tasks.task_id = task_transactions.task_id
         JOIN users AS assigned_to_user ON tasks.user_id = assigned_to_user.id 
@@ -431,6 +433,7 @@ if (hasPermission('view_all_tasks')) {
         JOIN users AS assigned_by_user ON tasks.assigned_by_id = assigned_by_user.id 
         JOIN user_departments AS assigned_by_ud ON assigned_by_user.id = assigned_by_ud.user_id
         JOIN departments AS assigned_by_department ON assigned_by_ud.department_id = assigned_by_department.id
+        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id -- Join predecessor task
         JOIN projects ON tasks.project_id = projects.id -- Join projects table
         WHERE assigned_to_ud.department_id IN (SELECT department_id FROM user_departments WHERE user_id = ?)
         GROUP BY tasks.task_id
@@ -443,7 +446,7 @@ if (hasPermission('view_all_tasks')) {
             tasks.recorded_timestamp DESC
     ";
 } elseif (hasPermission('view_own_tasks')) {
-    //Fetch only tasks assigned to the current user
+    // Fetch only tasks assigned to the current user
     $taskQuery = "
         SELECT 
             tasks.task_id,
@@ -459,16 +462,19 @@ if (hasPermission('view_all_tasks')) {
             tasks.recorded_timestamp,
             tasks.assigned_by_id,
             tasks.user_id,
+            tasks.predecessor_task_id, -- Add predecessor_task_id
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
             assigned_by_user.username AS assigned_by,
-            GROUP_CONCAT(DISTINCT assigned_by_department.name SEPARATOR ', ') AS assigned_by_department 
+            GROUP_CONCAT(DISTINCT assigned_by_department.name SEPARATOR ', ') AS assigned_by_department,
+            predecessor_task.task_name AS predecessor_task_name -- Add predecessor task name
         FROM tasks 
         LEFT JOIN task_transactions ON tasks.task_id = task_transactions.task_id
         JOIN users AS assigned_by_user ON tasks.assigned_by_id = assigned_by_user.id 
         JOIN user_departments AS assigned_by_ud ON assigned_by_user.id = assigned_by_ud.user_id
         JOIN departments AS assigned_by_department ON assigned_by_ud.department_id = assigned_by_department.id
+        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id -- Join predecessor task
         JOIN projects ON tasks.project_id = projects.id -- Join projects table
         WHERE tasks.user_id = ? 
         GROUP BY tasks.task_id
@@ -1307,7 +1313,9 @@ function getWeekdayHours($start, $end)
                                 <?php
                                 $taskCountStart = 1;
                                 foreach ($pendingStartedTasks as $row): ?>
-                                    <tr class="align-middle">
+                                    <tr class="align-middle"
+                                        data-task-id="<?= isset($row['task_id']) ? htmlspecialchars($row['task_id']) : '' ?>"
+                                        data-predecessor-task-id="<?= isset($row['predecessor_task_id']) ? htmlspecialchars($row['predecessor_task_id']) : '' ?>">
                                         <td><?= $taskCountStart++ ?></td> <!-- Display task count and increment -->
                                         <td><?= htmlspecialchars($row['project_name']) ?></td>
                                         <td>
@@ -1428,7 +1436,7 @@ function getWeekdayHours($start, $end)
                                                     </button>
                                                     <a href="#" class="btn btn-secondary view-timeline-btn"
                                                         data-task-id="<?= $row['task_id'] ?>">View Timeline</a>
-                                                        <?php if ((hasPermission('status_change_main') && $row['actual_start_date']) || ($row['assigned_by_id'] == $user_id && $row['actual_start_date'])): ?>
+                                                    <?php if ((hasPermission('status_change_main') && $row['actual_start_date']) || ($row['assigned_by_id'] == $user_id && $row['actual_start_date'])): ?>
                                                         <button type="button" class="btn btn-warning" data-bs-toggle="modal"
                                                             data-bs-target="#editStartDateModal<?= $row['task_id'] ?>">Edit Start
                                                             Date</button>
@@ -1476,7 +1484,7 @@ function getWeekdayHours($start, $end)
                                                 <?php endif; ?>
                                             </td>
                                         <?php else: ?>
-                                            <td>N/A</td>
+
                                         <?php endif; ?>
                                     </tr>
                                 <?php endforeach; ?>
@@ -1700,9 +1708,13 @@ function getWeekdayHours($start, $end)
                                 <input type="hidden" id="modal-status" name="status">
                                 <!-- Hidden input for Actual Completion Date (automatically populated) -->
                                 <input type="hidden" id="actual-completion-date" name="actual_finish_date">
+                                <!-- Hidden input for Predecessor Task ID -->
+                                <input type="hidden" id="predecessor-task-id" name="predecessor_task_id">
 
-                                <!-- Display predecessor task name -->
-                                <p><strong>Predecessor Task:</strong> <span id="predecessor-task-name"></span></p>
+                                <!-- Display predecessor task name, hidden by default -->
+                                <p id="predecessor-task-section" style="display: none;">
+                                    <strong>Predecessor Task:</strong> <span id="predecessor-task-name"></span>
+                                </p>
 
                                 <!-- Completion Description -->
                                 <div class="mb-3">
@@ -1936,8 +1948,15 @@ function getWeekdayHours($start, $end)
                     const status = event.target.value;
                     const form = event.target.form;
 
-                    // Fetch the predecessor task name
-                    const predecessorTaskName = $(`#pending-tasks tr[data-task-id="${taskId}"]`).find('td:eq(12)').text();
+                    // Fetch the predecessor task ID from the table row
+                    const row = $(`#pending-tasks tr[data-task-id="${taskId}"]`);
+                    const predecessorTaskId = row.data('predecessor-task-id') || null;
+                    let predecessorTaskName = row.find('td:eq(12)').text().trim(); // Predecessor Task column
+
+                    // Log for debugging
+                    console.log("Task ID:", taskId);
+                    console.log("Predecessor Task ID:", predecessorTaskId);
+                    console.log("Predecessor Task Name (from table):", predecessorTaskName);
 
                     if (status === 'Reassigned') {
                         document.getElementById('reassign-task-id').value = taskId;
@@ -1946,14 +1965,30 @@ function getWeekdayHours($start, $end)
                     } else if (status === 'Delayed Completion' || status === 'Completed on Time') {
                         document.getElementById('task-id').value = taskId;
                         document.getElementById('modal-status').value = status;
-                        document.getElementById('predecessor-task-name').innerText = predecessorTaskName;
+                        document.getElementById('predecessor-task-id').value = predecessorTaskId;
+
+                        // If predecessorTaskId exists but name is 'N/A', fetch it dynamically
+                        if (predecessorTaskId && (!predecessorTaskName || predecessorTaskName === 'N/A')) {
+                            fetch(`fetch-predecessor-task-name.php?task_id=${predecessorTaskId}`)
+                                .then(response => response.json())
+                                .then(data => {
+                                    predecessorTaskName = data.task_name || 'N/A';
+                                    document.getElementById('predecessor-task-name').innerText = predecessorTaskName;
+                                    showPredecessorSection(predecessorTaskId, predecessorTaskName);
+                                })
+                                .catch(error => {
+                                    console.error('Error fetching predecessor task name:', error);
+                                    document.getElementById('predecessor-task-name').innerText = 'N/A';
+                                    showPredecessorSection(predecessorTaskId, 'N/A');
+                                });
+                        } else {
+                            document.getElementById('predecessor-task-name').innerText = predecessorTaskName;
+                            showPredecessorSection(predecessorTaskId, predecessorTaskName);
+                        }
+
                         const delayedReasonContainer = document.getElementById('delayed-reason-container');
                         if (delayedReasonContainer) {
-                            if (status === 'Delayed Completion') {
-                                delayedReasonContainer.style.display = 'block';
-                            } else {
-                                delayedReasonContainer.style.display = 'none';
-                            }
+                            delayedReasonContainer.style.display = (status === 'Delayed Completion') ? 'block' : 'none';
                         }
                         const completionModal = new bootstrap.Modal(document.getElementById('completionModal'));
                         completionModal.show();
@@ -1983,6 +2018,14 @@ function getWeekdayHours($start, $end)
                     }
                 }
 
+                function showPredecessorSection(predecessorTaskId, predecessorTaskName) {
+                    const predecessorSection = document.getElementById('predecessor-task-section');
+                    if (predecessorTaskId && predecessorTaskName !== 'N/A') {
+                        predecessorSection.style.display = 'block';
+                    } else {
+                        predecessorSection.style.display = 'none';
+                    }
+                }
                 // Handle Reassignment Form Submission
                 function handleReassignmentForm(event) {
                     event.preventDefault(); // Prevent the default form submission
