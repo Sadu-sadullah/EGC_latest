@@ -1,17 +1,18 @@
 <?php
-// Enable error reporting for debugging
+// Enable error reporting for debugging (consider disabling in production)
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
 // Ensure proper JSON response
 header('Content-Type: application/json');
-ob_start(); // Prevent unwanted output before JSON response
+ob_start(); // Start output buffering
 
 session_start();
 
 // Check if the user is logged in
 if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
+    ob_end_clean(); // Clear buffer before output
     echo json_encode(['success' => false, 'message' => 'Unauthorized access.']);
     exit;
 }
@@ -20,7 +21,7 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
 if (isset($_COOKIE['user_timezone'])) {
     date_default_timezone_set($_COOKIE['user_timezone']);
 } else {
-    date_default_timezone_set('UTC'); // Default to UTC if missing
+    date_default_timezone_set('UTC');
 }
 
 $currentTime = date('Y-m-d H:i:s');
@@ -28,6 +29,7 @@ $currentTime = date('Y-m-d H:i:s');
 // Include the configuration file
 $configPath = realpath(__DIR__ . '/../config.php');
 if (!file_exists($configPath)) {
+    ob_end_clean();
     echo json_encode(['success' => false, 'message' => 'Config file not found.']);
     exit;
 }
@@ -47,6 +49,7 @@ try {
     $pdo = new PDO($dsn, $dbUsername, $dbPassword);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch (PDOException $e) {
+    ob_end_clean();
     echo json_encode(['success' => false, 'message' => 'Database connection failed: ' . $e->getMessage()]);
     exit;
 }
@@ -62,16 +65,18 @@ try {
     $delayed_reason = $_POST['delayed_reason'] ?? null;
 
     if (!$task_id || !$new_status) {
+        ob_end_clean();
         echo json_encode(['success' => false, 'message' => 'Invalid request parameters.']);
         exit;
     }
 
-    // Fetch the current task details
-    $stmt = $pdo->prepare("SELECT status, assigned_by_id, user_id, task_name, predecessor_task_id, completion_description, actual_finish_date FROM tasks WHERE task_id = ?");
+    // Fetch the current task details (ensure actual_start_date is included)
+    $stmt = $pdo->prepare("SELECT status, assigned_by_id, user_id, task_name, predecessor_task_id, completion_description, actual_finish_date, actual_start_date FROM tasks WHERE task_id = ?");
     $stmt->execute([$task_id]);
     $task = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$task) {
+        ob_end_clean();
         echo json_encode(['success' => false, 'message' => 'Task not found.']);
         exit;
     }
@@ -83,6 +88,7 @@ try {
     $predecessor_task_id = $task['predecessor_task_id'];
     $existing_completion_description = $task['completion_description'];
     $existing_actual_finish_date = $task['actual_finish_date'];
+    $actual_start_date = $task['actual_start_date']; // Ensure this is fetched
 
     // Define status categories
     $assignerStatuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
@@ -108,13 +114,13 @@ try {
         if (in_array($current_status, $assignerStatuses)) {
             $statuses = $assignerStatuses;
         } elseif (in_array($current_status, ['Completed on Time', 'Delayed Completion'])) {
-            $statuses = ['Closed']; // Allow transition to Closed from completed states
+            $statuses = ['Closed'];
         }
     }
 
     // Logic for self-assigned users with status_change_normal
     if ($isSelfAssigned && hasPermission('status_change_normal')) {
-        $statuses = $assignerStatuses; // Start with assigner statuses
+        $statuses = $assignerStatuses;
         if (isset($normalUserStatuses[$current_status])) {
             $statuses = array_merge($statuses, $normalUserStatuses[$current_status]);
         } else {
@@ -133,31 +139,34 @@ try {
     }
 
     // Validate the new status
-    if (!in_array($new_status, $statuses)) {
+    if ($new_status !== $current_status && !in_array($new_status, $statuses)) {
+        ob_end_clean();
         echo json_encode(['success' => false, 'message' => 'Invalid status change.']);
         exit;
     }
 
     // Check if the task has a predecessor and ensure it is completed before starting the task
-    if ($predecessor_task_id && $new_status === 'In Progress') {
+    if ($predecessor_task_id && $new_status === 'In Progress' && $new_status !== $current_status) {
         $predecessorStmt = $pdo->prepare("SELECT status, actual_finish_date FROM tasks WHERE task_id = ?");
         $predecessorStmt->execute([$predecessor_task_id]);
         $predecessorTask = $predecessorStmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$predecessorTask || !in_array($predecessorTask['status'], ['Completed on Time', 'Delayed Completion'])) {
+            ob_end_clean();
             echo json_encode(['success' => false, 'message' => 'Cannot start this task until the predecessor task is completed.']);
             exit;
         }
 
-        // Set the actual start date of the sequential task to the day after the predecessor's actual finish date
         $actualStartDate = date('Y-m-d H:i:s', strtotime($predecessorTask['actual_finish_date'] . ' +1 day'));
     } else {
         $actualStartDate = $currentTime;
     }
 
     // Perform task update based on new status
-    if ($new_status === 'In Progress') {
-        $sql = "UPDATE tasks SET status = ?, actual_start_date = ? WHERE task_id = ?";
+    if ($new_status === $current_status) {
+        // No status change intended; skip status update but allow actual_start_date edit below
+    } elseif ($new_status === 'In Progress') {
+        $sql = "UPDATE tasks SET status = ?, actual_start_date = COALESCE(actual_start_date, ?) WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$new_status, $actualStartDate, $task_id]);
     } elseif ($new_status === 'Completed on Time' || $new_status === 'Delayed Completion') {
@@ -171,12 +180,10 @@ try {
             $stmt->execute([$task_id, $delayed_reason]);
         }
     } elseif ($new_status === 'Closed') {
-        // For "Closed," only update the status; retain existing completion_description and actual_finish_date
         $sql = "UPDATE tasks SET status = ? WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$new_status, $task_id]);
 
-        // If the task was "Delayed Completion," ensure delayed_reason persists by fetching it from task_transactions
         if ($current_status === 'Delayed Completion') {
             $delayStmt = $pdo->prepare("SELECT delayed_reason FROM task_transactions WHERE task_id = ? ORDER BY actual_finish_date DESC LIMIT 1");
             $delayStmt->execute([$task_id]);
@@ -188,14 +195,29 @@ try {
         $stmt->execute([$new_status, $task_id]);
     }
 
-    // Log the status change in task_timeline
-    $sql = "INSERT INTO task_timeline (task_id, action, previous_status, new_status, changed_by_user_id) VALUES (?, 'status_changed', ?, ?, ?)";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([$task_id, $current_status, $new_status, $user_id]);
+    // Allow users with status_change_main to update actual_start_date if provided
+    if (isset($_POST['actual_start_date']) && hasPermission('status_change_main') && $task['actual_start_date'] !== null) {
+        $sql = "UPDATE tasks SET actual_start_date = ? WHERE task_id = ?";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$_POST['actual_start_date'], $task_id]);
 
-    // Successful response
-    echo json_encode(['success' => true, 'message' => 'Status updated successfully.', 'task_name' => $task_name]);
-} catch (PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+        $sql = "INSERT INTO task_timeline (task_id, action, previous_status, new_status, changed_by_user_id) VALUES (?, 'actual_start_date_updated', ?, ?, ?)";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$task_id, $current_status, $current_status, $user_id]);
+    }
+
+    // Log the status change in task_timeline (only if status actually changed)
+    if ($new_status !== $current_status) {
+        $sql = "INSERT INTO task_timeline (task_id, action, previous_status, new_status, changed_by_user_id) VALUES (?, 'status_changed', ?, ?, ?)";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$task_id, $current_status, $new_status, $user_id]);
+    }
+
+    // Clear buffer and send successful response
+    ob_end_clean();
+    echo json_encode(['success' => true, 'message' => 'Operation completed successfully.', 'task_name' => $task_name]);
+} catch (Exception $e) {
+    ob_end_clean();
+    echo json_encode(['success' => false, 'message' => 'An error occurred: ' . $e->getMessage()]);
 }
 ?>
