@@ -508,6 +508,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="sidebar">
             <h3>Menu</h3>
             <a href="tasks.php">Tasks</a>
+            <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
+                <a href="task-actions.php">Task Actions</a>
+            <?php endif; ?>
             <?php if (hasPermission('read_users')): ?>
                 <a href="view-users.php">View Users</a>
             <?php endif; ?>
