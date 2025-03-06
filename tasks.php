@@ -68,6 +68,12 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
+// Display and clear task creation success message
+if (isset($_SESSION['task_added_success'])) {
+    $message = $_SESSION['task_added_success'];
+    echo "<script>alert('$message');</script>";
+    unset($_SESSION['task_added_success']); // Clear the message after displaying it
+}
 
 // Prepare and execute the query to fetch the session token
 $checkStmt = $conn->prepare("SELECT session_token FROM users WHERE id = ?");
@@ -225,7 +231,6 @@ function sendTaskNotification($email, $username, $project_name, $project_type, $
 }
 
 // Handle form submission for adding a task
-// Handle form submission for adding a task
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
     $project_id = isset($_POST['project_id']) ? (int) $_POST['project_id'] : null;
     $task_name = trim($_POST['task_name']);
@@ -300,7 +305,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
         $stmt->bind_param($types, ...$params);
 
         if ($stmt->execute()) {
-            echo '<script>alert("Task added successfully.");</script>';
+            $task_id = $stmt->insert_id; // Get the newly created task ID
 
             // Fetch the assigned user's email and username
             $userQuery = $conn->prepare("SELECT username, email FROM users WHERE id = ?");
@@ -333,20 +338,30 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
                         $project_type,
                         $planned_start_date,
                         $planned_finish_date,
-                        $assigned_by_id, // Pass the assigned_by_id
-                        $conn // Pass the database connection
+                        $assigned_by_id,
+                        $conn
                     );
                 }
             }
 
             // Log the task creation in task_timeline
-            $task_id = $stmt->insert_id;
-            $stmt = $conn->prepare("
+            $timelineStmt = $conn->prepare("
                 INSERT INTO task_timeline (task_id, action, previous_status, new_status, changed_by_user_id)
                 VALUES (?, 'task_created', NULL, 'assigned', ?)
             ");
-            $stmt->bind_param("ii", $task_id, $assigned_by_id);
-            $stmt->execute();
+            $timelineStmt->bind_param("ii", $task_id, $assigned_by_id);
+            $timelineStmt->execute();
+            $timelineStmt->close();
+
+            // Close the statement
+            $stmt->close();
+
+            // Set session variable for success message
+            $_SESSION['task_added_success'] = "Task added successfully.";
+
+            // Redirect to tasks.php (no query parameters needed)
+            header("Location: tasks.php");
+            exit;
         } else {
             echo '<script>alert("Failed to add task.");</script>';
         }
