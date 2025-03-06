@@ -425,6 +425,14 @@ $completedTasks = array_filter($allTasks, function ($task) {
     return in_array($task['status'], ['Completed on Time', 'Delayed Completion', 'Closed']);
 });
 
+// Calculate task counts by status
+$statusCounts = array_count_values(array_column($allTasks, 'status'));
+$pendingStatuses = ['Assigned', 'In Progress', 'Hold', 'Reinstated', 'Reassigned', 'Cancelled'];
+$completedStatuses = ['Completed on Time', 'Delayed Completion', 'Closed'];
+
+$pendingCounts = array_intersect_key($statusCounts, array_flip($pendingStatuses));
+$completedCounts = array_intersect_key($statusCounts, array_flip($completedStatuses));
+
 function getWeekdayHours($start, $end)
 {
     if ($start >= $end) {
@@ -794,6 +802,35 @@ function getWeekdayHours($start, $end)
         #status-filter {
             width: 300px;
         }
+
+        .status-counts {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .status-box {
+            background-color: #f9f9f9;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 10px 15px;
+            text-align: center;
+            min-width: 150px;
+        }
+
+        .status-box h4 {
+            margin: 0;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .status-box span {
+            font-size: 18px;
+            font-weight: bold;
+            color: #002c5f;
+        }
     </style>
 </head>
 
@@ -996,6 +1033,28 @@ function getWeekdayHours($start, $end)
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    <div class="status-counts">
+                        <h3>Task Status Overview</h3>
+                        <div style="width: 100%; text-align: center;">
+                            <h4>In Progress</h4>
+                        </div>
+                        <?php foreach ($pendingStatuses as $status): ?>
+                            <div class="status-box">
+                                <h4><?= htmlspecialchars($status) ?></h4>
+                                <span><?= $pendingCounts[$status] ?? 0 ?></span>
+                            </div>
+                        <?php endforeach; ?>
+                        <div style="width: 100%; text-align: center;">
+                            <h4>Completed</h4>
+                        </div>
+                        <?php foreach ($completedStatuses as $status): ?>
+                            <div class="status-box">
+                                <h4><?= htmlspecialchars($status) ?></h4>
+                                <span><?= $completedCounts[$status] ?? 0 ?></span>
+                            </div>
+                        <?php endforeach; ?>
                     </div>
 
                     <h3>Tasks In Progress</h3>
