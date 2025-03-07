@@ -378,7 +378,7 @@ try {
 <body>
     <div class="dashboard-container">
         <div class="sidebar">
-    <h3>Menu</h3>
+    <h3>TMS</h3>
     <a href="tasks.php">Tasks</a>
     <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
         <a href="task-actions.php">Task Actions</a>
@@ -412,7 +412,7 @@ try {
                 </div>
 
                 <!-- Back Button -->
-                <button class="back-btn" onclick="window.location.href='welcome.php'">Back</button>
+                <button class="back-btn" onclick="window.location.href='welcome.php'">Dashboard</button>
             </div>
 
             <!-- Dashboard Content -->

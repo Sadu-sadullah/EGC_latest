@@ -227,7 +227,7 @@ $completedTasks = array_filter($allTasks, function ($task) {
 <body>
     <div class="dashboard-container">
     <div class="sidebar">
-    <h3>Menu</h3>
+    <h3>TMS</h3>
     <a href="tasks.php">Tasks</a>
     <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
         <a href="task-actions.php">Task Actions</a>
@@ -252,7 +252,7 @@ $completedTasks = array_filter($allTasks, function ($task) {
                     <p class="mb-0">Logged in as: <strong><?= htmlspecialchars($loggedInUsername) ?></strong></p>
                     <p class="mb-0">Departments: <strong><?= htmlspecialchars($loggedInDepartment ?? 'Unknown') ?></strong></p>
                 </div>
-                <button class="back-btn" onclick="window.location.href='welcome.php'">Back</button>
+                <button class="back-btn" onclick="window.location.href='welcome.php'">Dashboard</button>
             </div>
 
             <div class="task-container">

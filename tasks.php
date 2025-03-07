@@ -433,6 +433,27 @@ $completedStatuses = ['Completed on Time', 'Delayed Completion', 'Closed'];
 $pendingCounts = array_intersect_key($statusCounts, array_flip($pendingStatuses));
 $completedCounts = array_intersect_key($statusCounts, array_flip($completedStatuses));
 
+// Fetch the earliest recorded date from the tasks table
+$earliestDateQuery = $conn->query("SELECT MIN(recorded_timestamp) AS earliest_date FROM tasks");
+if ($earliestDateQuery && $earliestDateQuery->num_rows > 0) {
+    $earliestDateRow = $earliestDateQuery->fetch_assoc();
+    $earliestDate = $earliestDateRow['earliest_date'];
+} else {
+    // Fallback to a default date if no tasks exist (e.g., current date)
+    $earliestDate = date("Y-m-d");
+}
+
+// Convert the earliest date to a DateTime object
+$earliestDateTime = new DateTime($earliestDate);
+
+// Calculate the maximum date (1 year from the earliest date)
+$maxDateTime = clone $earliestDateTime;
+$maxDateTime->modify('+1 year');
+
+// Format the dates for the HTML input (type="date" expects YYYY-MM-DD)
+$minDate = $earliestDateTime->format('Y-m-d');
+$maxDate = $maxDateTime->format('Y-m-d');
+
 function getWeekdayHours($start, $end)
 {
     if ($start >= $end) {
@@ -482,6 +503,8 @@ function getWeekdayHours($start, $end)
             background-color: #f4f4f4;
             margin: 0;
             padding: 0;
+            overflow-x: hidden;
+            /* Prevent horizontal scrolling on the body */
         }
 
         * {
@@ -490,12 +513,15 @@ function getWeekdayHours($start, $end)
 
         .task-container {
             width: 100%;
-            max-width: 1400px;
-            margin: 25px auto;
+            max-width: 100vw;
+            /* Ensure it doesn't exceed the viewport width */
+            margin: 25px 0;
             background-color: #fff;
             padding: 20px;
             border-radius: 10px;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            overflow-x: auto;
+            /* Enable horizontal scrolling */
         }
 
         h2 {
@@ -563,6 +589,8 @@ function getWeekdayHours($start, $end)
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
+            min-width: 1200px;
+            /* Ensure the table has a minimum width */
         }
 
         th,
@@ -570,6 +598,8 @@ function getWeekdayHours($start, $end)
             border: 1px solid #ccc;
             padding: 10px;
             text-align: left;
+            white-space: nowrap;
+            /* Prevent text wrapping */
         }
 
         th {
@@ -726,9 +756,13 @@ function getWeekdayHours($start, $end)
             color: white;
         }
 
+        /* Sidebar and Navbar Styles */
         .dashboard-container {
             display: flex;
             min-height: 100vh;
+            width: 100%;
+            overflow-x: hidden;
+            /* Prevent horizontal scrolling */
         }
 
         .sidebar {
@@ -736,6 +770,8 @@ function getWeekdayHours($start, $end)
             background-color: #002c5f;
             color: white;
             padding: 20px;
+            flex-shrink: 0;
+            /* Prevent sidebar from shrinking */
         }
 
         .sidebar a {
@@ -756,6 +792,8 @@ function getWeekdayHours($start, $end)
             flex-grow: 1;
             padding: 20px;
             background-color: #ffffff;
+            overflow-x: hidden;
+            /* Prevent horizontal scrolling */
         }
 
         .navbar {
@@ -765,6 +803,9 @@ function getWeekdayHours($start, $end)
             background-color: #ffffff;
             border-radius: 10px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 100vw;
+            /* Ensure it doesn't exceed the viewport width */
         }
 
         .user-info {
@@ -951,7 +992,7 @@ function getWeekdayHours($start, $end)
 
     <div class="dashboard-container">
         <div class="sidebar">
-            <h3>Menu</h3>
+            <h3>TMS</h3>
             <a href="tasks.php">Tasks</a>
             <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
                 <a href="task-actions.php">Task Actions</a>
@@ -978,7 +1019,7 @@ function getWeekdayHours($start, $end)
                         <strong><?= htmlspecialchars($loggedInDepartment ?? 'Unknown') ?></strong>
                     </p>
                 </div>
-                <button class="back-btn" onclick="window.location.href='welcome.php'">Back</button>
+                <button class="back-btn" onclick="window.location.href='welcome.php'">Dashboard</button>
             </div>
 
             <div class="task-container">
@@ -1025,11 +1066,13 @@ function getWeekdayHours($start, $end)
                             <div class="filter-date">
                                 <div class="filter-dropdown">
                                     <label for="start-date">Start Date:</label>
-                                    <input type="date" id="start-date">
+                                    <input type="date" id="start-date" min="<?= htmlspecialchars($minDate) ?>"
+                                        max="<?= htmlspecialchars($maxDate) ?>">
                                 </div>
                                 <div class="filter-dropdown">
                                     <label for="end-date">End Date:</label>
-                                    <input type="date" id="end-date">
+                                    <input type="date" id="end-date" min="<?= htmlspecialchars($minDate) ?>"
+                                        max="<?= htmlspecialchars($maxDate) ?>">
                                 </div>
                             </div>
                         </div>
@@ -1736,8 +1779,39 @@ function getWeekdayHours($start, $end)
             function applyFilters() {
                 const selectedProjects = $('#project-filter').val() || [];
                 const selectedDepartments = $('#department-filter').val() || [];
-                const startDate = $('#start-date').val();
-                const endDate = $('#end-date').val();
+                let startDate = $('#start-date').val();
+                let endDate = $('#end-date').val();
+
+                // Get the min and max dates from the input attributes
+                const minDate = $('#start-date').attr('min');
+                const maxDate = $('#start-date').attr('max');
+
+                // Validate startDate and endDate
+                if (startDate) {
+                    const startDateObj = new Date(startDate);
+                    const minDateObj = new Date(minDate);
+                    const maxDateObj = new Date(maxDate);
+                    if (startDateObj < minDateObj) {
+                        startDate = minDate; // Reset to minDate if earlier
+                        $('#start-date').val(minDate);
+                    } else if (startDateObj > maxDateObj) {
+                        startDate = maxDate; // Reset to maxDate if later
+                        $('#start-date').val(maxDate);
+                    }
+                }
+
+                if (endDate) {
+                    const endDateObj = new Date(endDate);
+                    const minDateObj = new Date(minDate);
+                    const maxDateObj = new Date(maxDate);
+                    if (endDateObj < minDateObj) {
+                        endDate = minDate; // Reset to minDate if earlier
+                        $('#end-date').val(minDate);
+                    } else if (endDateObj > maxDateObj) {
+                        endDate = maxDate; // Reset to maxDate if later
+                        $('#end-date').val(maxDate);
+                    }
+                }
 
                 const pendingVisibleRows = filterAndPaginateTable('#pending-tasks', selectedProjects, selectedDepartments, startDate, endDate, currentPage);
                 const completedVisibleRows = filterAndPaginateTable('#remaining-tasks', selectedProjects, selectedDepartments, startDate, endDate, currentPage);

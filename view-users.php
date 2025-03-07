@@ -211,7 +211,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         .main-container {
             width: 100%;
-            max-width: 1400px;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -221,7 +220,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .container {
             width: 100%;
             max-width: 1400px;
-            margin: 20px auto;
+            margin: 20px 0;
+            /* Changed from auto to avoid centering conflict */
             padding: 20px;
             background-color: #fff;
             border-radius: 10px;
@@ -281,7 +281,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 1rem;
             transition: background-color 0.3s ease;
             margin-top: 20px;
-            /* Add margin to separate it from the table */
         }
 
         .back-button:hover {
@@ -443,6 +442,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             background-color: #002c5f;
             color: white;
             padding: 20px;
+            flex-shrink: 0;
+            /* Prevent sidebar from shrinking */
         }
 
         .sidebar a {
@@ -463,7 +464,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flex-grow: 1;
             padding: 20px;
             background-color: #ffffff;
-            width: 100%;
+            /* Removed width: 100% to avoid flex conflict */
         }
 
         .navbar {
@@ -506,7 +507,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="dashboard-container">
         <!-- Sidebar -->
         <div class="sidebar">
-            <h3>Menu</h3>
+            <h3>TMS</h3>
             <a href="tasks.php">Tasks</a>
             <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
                 <a href="task-actions.php">Task Actions</a>
@@ -540,7 +541,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
 
                 <!-- Back Button -->
-                <button class="back-btn" onclick="window.location.href='welcome.php'">Back</button>
+                <button class="back-btn" onclick="window.location.href='welcome.php'">Dashboard</button>
             </div>
             <div class="main-container">
                 <div class="container">

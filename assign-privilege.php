@@ -165,6 +165,8 @@ function formatPermissionName($permissionName)
         .dashboard-container {
             display: flex;
             min-height: 100vh;
+            width: 100%;
+            /* Ensure it spans full width */
         }
 
         .sidebar {
@@ -172,6 +174,8 @@ function formatPermissionName($permissionName)
             background-color: #002c5f;
             color: white;
             padding: 20px;
+            flex-shrink: 0;
+            /* Prevent sidebar from shrinking */
         }
 
         .sidebar a {
@@ -192,6 +196,7 @@ function formatPermissionName($permissionName)
             flex-grow: 1;
             padding: 20px;
             background-color: #ffffff;
+            /* Removed width: 100% to avoid flex conflict */
         }
 
         .user-info {
@@ -216,7 +221,8 @@ function formatPermissionName($permissionName)
         .container {
             width: 100%;
             max-width: 1400px;
-            margin: 20px auto;
+            margin: 20px 0;
+            /* Changed from auto to avoid centering conflict */
             padding: 20px;
             background-color: #fff;
             border-radius: 10px;
@@ -395,21 +401,21 @@ function formatPermissionName($permissionName)
 <body>
     <div class="dashboard-container">
         <div class="sidebar">
-    <h3>Menu</h3>
-    <a href="tasks.php">Tasks</a>
-    <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
-        <a href="task-actions.php">Task Actions</a>
-    <?php endif; ?>
-    <?php if (hasPermission('read_users')): ?>
-        <a href="view-users.php">View Users</a>
-    <?php endif; ?>
-    <?php if (hasPermission('read_roles_&_departments')): ?>
-        <a href="view-roles-departments.php">View Role or Department</a>
-    <?php endif; ?>
-    <?php if (hasPermission('read_&_write_privileges')): ?>
-        <a href="assign-privilege.php">Assign & View Privileges</a>
-    <?php endif; ?>
-</div>
+            <h3>TMS</h3>
+            <a href="tasks.php">Tasks</a>
+            <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
+                <a href="task-actions.php">Task Actions</a>
+            <?php endif; ?>
+            <?php if (hasPermission('read_users')): ?>
+                <a href="view-users.php">View Users</a>
+            <?php endif; ?>
+            <?php if (hasPermission('read_roles_&_departments')): ?>
+                <a href="view-roles-departments.php">View Role or Department</a>
+            <?php endif; ?>
+            <?php if (hasPermission('read_&_write_privileges')): ?>
+                <a href="assign-privilege.php">Assign & View Privileges</a>
+            <?php endif; ?>
+        </div>
 
         <!-- Main Content -->
         <div class="main-content">
@@ -430,7 +436,7 @@ function formatPermissionName($permissionName)
                 </div>
 
                 <!-- Back Button -->
-                <button class="back-btn" onclick="window.location.href='welcome.php'">Back</button>
+                <button class="back-btn" onclick="window.location.href='welcome.php'">Dashboard</button>
             </div>
 
             <!-- Dashboard Content -->

@@ -191,6 +191,10 @@ try {
         $stmt->execute();
         $topPerformers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+        // Fetch`total projects
+        $stmt = $pdo->prepare("SELECT COUNT(*) as total_projects FROM projects");
+        $stmt->execute();
+        $totalProjects = $stmt->fetch(PDO::FETCH_ASSOC)['total_projects'];
     }
 
     if (hasPermission('view_department_tasks')) {
@@ -363,6 +367,21 @@ try {
         $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
         $avgDuration = round($avgDuration ?? 0, 1); // Default to 0 if null and round
 
+        // Fetch total projects for departments wise
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as total_projects 
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            JOIN user_departments ud ON t.user_id = ud.user_id
+            WHERE ud.department_id IN (
+                SELECT department_id 
+                FROM user_departments 
+                WHERE user_id = :user_id
+            )
+        ");
+        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $totalProjects = $stmt->fetch(PDO::FETCH_ASSOC)['total_projects'];
     }
 
     // For User
@@ -443,6 +462,16 @@ try {
         $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
         $avgDuration = round($avgDuration ?? 0, 1);
 
+        // Fetch total projects for the user
+        $stmt = $pdo->prepare("
+                SELECT COUNT(DISTINCT p.id) as total_projects 
+                FROM projects p
+                JOIN tasks t ON p.id = t.project_id
+                WHERE t.user_id = :user_id
+            ");
+        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $totalProjects = $stmt->fetch(PDO::FETCH_ASSOC)['total_projects'];
     }
 
     // Optional: Session timeout settings
@@ -486,6 +515,8 @@ try {
         .dashboard-container {
             display: flex;
             min-height: 100vh;
+            width: 100%;
+            /* Ensure full viewport width */
         }
 
         .sidebar {
@@ -493,6 +524,8 @@ try {
             background-color: #002c5f;
             color: white;
             padding: 20px;
+            flex-shrink: 0;
+            /* Prevent sidebar from shrinking */
         }
 
         .sidebar a {
@@ -579,11 +612,12 @@ try {
         .navbar {
             display: flex;
             align-items: center;
-            /* Vertically center all items in the navbar */
             padding: 10px 20px;
+            /* Keep vertical padding 10px, horizontal matches dashboard-content */
             background-color: #ffffff;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
             border-radius: 10px;
+            /* Remove width: 100% and let it inherit from parent */
         }
 
         .chart-canvas {
@@ -613,6 +647,20 @@ try {
         .table-striped tbody tr:nth-of-type(odd) {
             background-color: rgba(0, 44, 95, 0.05);
         }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        /* Middle-align only metric cards (non-chart cards) */
+        .card.metric-card .card-body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            height: 100%;
+        }
     </style>
 </head>
 
@@ -620,7 +668,7 @@ try {
     <div class="dashboard-container">
         <!-- Sidebar -->
         <div class="sidebar">
-            <h3>Menu</h3>
+            <h3>TMS</h3>
             <a href="tasks.php">Tasks</a>
             <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
                 <a href="task-actions.php">Task Actions</a>
@@ -661,20 +709,30 @@ try {
             <div class="dashboard-content">
                 <!-- Row 1: Key Metrics -->
                 <div class="row mb-4">
-                    <!-- Open Tickets -->
+                    <!-- Total Projects -->
                     <div class="col-md-3">
-                        <div class="card h-100">
+                        <div class="card metric-card h-100">
+                            <div class="card-body">
+                                <h5 class="card-title">Total Projects</h5>
+                                <p class="card-text display-4"><?= $totalProjects ?></p>
+                                <p class="text-muted">Created</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Open Tickets -->
+                    <div class="col-md-2">
+                        <div class="card metric-card h-100">
                             <div class="card-body">
                                 <h5 class="card-title">Tasks</h5>
                                 <p class="card-text display-4"><?= $totalTasks ?></p>
-                                <p class="text-muted">Total Tasks</p>
+                                <p class="text-muted">In Total</p>
                             </div>
                         </div>
                     </div>
 
                     <!-- Tasks in Progress -->
-                    <div class="col-md-3">
-                        <div class="card h-100">
+                    <div class="col-md-2">
+                        <div class="card metric-card h-100">
                             <div class="card-body">
                                 <h5 class="card-title">Tasks in Progress</h5>
                                 <p class="card-text display-4"><?= $tasksInProgress ?></p>
@@ -684,19 +742,19 @@ try {
                     </div>
 
                     <!-- Tasks on Hold-->
-                    <div class="col-md-3">
-                        <div class="card h-100">
+                    <div class="col-md-2">
+                        <div class="card metric-card h-100">
                             <div class="card-body">
                                 <h5 class="card-title">Tasks on Hold</h5>
                                 <p class="card-text display-4"><?= $tasksOnHold ?></p>
-                                <p class="text-muted">In Total</p>
+                                <p class="text-muted">Paused</p>
                             </div>
                         </div>
                     </div>
 
                     <!-- Delayed Tasks -->
                     <div class="col-md-3">
-                        <div class="card h-100">
+                        <div class="card metric-card h-100">
                             <div class="card-body">
                                 <h5 class="card-title">Delayed Tasks</h5>
                                 <p class="card-text display-4"><?= $delayedTasks ?></p>
@@ -712,7 +770,7 @@ try {
                     <div class="col-md-6">
                         <div class="card h-100">
                             <div class="card-body">
-                                <h5 class="card-title">Task Distribution</h5>
+                                <h5 class="text-center card-title">Task Distribution</h5>
                                 <div class="text-center">
                                     <canvas id="taskDistributionChart" class="chart-canvas"></canvas>
                                 </div>
@@ -724,7 +782,7 @@ try {
                     <div class="col-md-6">
                         <div class="card h-100">
                             <div class="card-body">
-                                <h5 class="card-title">Task Completion Over Time</h5>
+                                <h5 class="text-center card-title">Task Completion Over Time</h5>
                                 <div class="text-center">
                                     <canvas id="taskCompletionChart" class="chart-canvas"></canvas>
                                 </div>
@@ -737,7 +795,7 @@ try {
                 <div class="row mb-4">
                     <!-- Average Task Duration -->
                     <div class="col-md-4">
-                        <div class="card h-100">
+                        <div class="card metric-card h-100">
                             <div class="card-body">
                                 <h5 class="card-title">Average Task Duration</h5>
                                 <p class="card-text display-4"><?= $avgDuration ?></p>
@@ -751,9 +809,7 @@ try {
                         <div class="col-md-4">
                             <div class="card h-100">
                                 <div class="card-body">
-                                    <h5 class="card-title">
-                                        <?= (hasPermission('dashboard_tasks_department')) ? 'Tasks in My Departments' : 'Tasks by Department' ?>
-                                    </h5>
+                                    <h5 class="text-center card-title">Tasks by Department</h5>
                                     <div class="text-center">
                                         <canvas id="tasksByDepartmentChart"></canvas>
                                     </div>
@@ -767,9 +823,7 @@ try {
                         <div class="col-md-4">
                             <div class="card h-100">
                                 <div class="card-body">
-                                    <h5 class="card-title">
-                                        <?= (hasPermission('dashboard_tasks_department')) ? 'Top Performers in My Departments' : 'Top Performers' ?>
-                                    </h5>
+                                    <h5 class="text-center card-title">Top Performers</h5>
                                     <ul class="list-group list-group-flush">
                                         <?php foreach ($topPerformers as $performer): ?>
                                             <li class="list-group-item"><?= htmlspecialchars($performer['username']) ?>
