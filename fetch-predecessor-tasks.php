@@ -20,12 +20,13 @@ if ($conn->connect_error) {
 }
 
 // Get input values
-$projectId = $_POST['project_id'] ?? 0; // Use project_id
+$projectId = $_POST['project_id'] ?? 0;
 $userId = $_POST['user_id'] ?? 0;
+$projectType = $_POST['project_type'] ?? ''; // Add project_type
 
 // Validate inputs
-if (empty($projectId) || empty($userId)) {
-    echo json_encode(["error" => "Invalid input: Project ID or User ID is missing."]);
+if (empty($projectId) || empty($userId) || empty($projectType)) {
+    echo json_encode(["error" => "Invalid input: Project ID, User ID, or Project Type is missing."]);
     exit;
 }
 
@@ -37,11 +38,12 @@ $predecessorTasksQuery = $conn->prepare("
       AND status = 'Assigned' 
       AND assigned_by_id = ? 
       AND project_id = ? 
+      AND project_type = ? 
     ORDER BY recorded_timestamp DESC
 ");
 
 // Bind parameters and execute query
-$predecessorTasksQuery->bind_param("ii", $userId, $projectId); // Bind project_id as an integer
+$predecessorTasksQuery->bind_param("iis", $userId, $projectId, $projectType); // 'iis' for integer, integer, string
 $predecessorTasksQuery->execute();
 $result = $predecessorTasksQuery->get_result();
 

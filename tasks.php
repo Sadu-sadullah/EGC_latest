@@ -277,7 +277,8 @@ if (hasPermission('view_all_tasks')) {
         JOIN users AS assigned_by_user ON tasks.assigned_by_id = assigned_by_user.id 
         JOIN user_departments AS assigned_by_ud ON assigned_by_user.id = assigned_by_ud.user_id
         JOIN departments AS assigned_by_department ON assigned_by_ud.department_id = assigned_by_department.id
-        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id
+        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id 
+            AND tasks.project_type = predecessor_task.project_type
         JOIN projects ON tasks.project_id = projects.id
         GROUP BY tasks.task_id
         ORDER BY 
@@ -321,7 +322,8 @@ if (hasPermission('view_all_tasks')) {
         JOIN users AS assigned_by_user ON tasks.assigned_by_id = assigned_by_user.id 
         JOIN user_departments AS assigned_by_ud ON assigned_by_user.id = assigned_by_ud.user_id
         JOIN departments AS assigned_by_department ON assigned_by_ud.department_id = assigned_by_department.id
-        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id
+        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id 
+            AND tasks.project_type = predecessor_task.project_type
         JOIN projects ON tasks.project_id = projects.id
         WHERE assigned_to_ud.department_id IN (SELECT department_id FROM user_departments WHERE user_id = ?)
         GROUP BY tasks.task_id
@@ -1978,10 +1980,11 @@ function getWeekdayHours($start, $end)
                 document.getElementById('predecessor_task_id').innerHTML = '<option value="">Select a predecessor task</option>';
                 return;
             }
+            const projectType = document.getElementById('project_type').value; // Get project_type from dropdown
             fetch('fetch-predecessor-tasks.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: `project_id=${encodeURIComponent(projectId)}&user_id=<?= $user_id ?>`
+                body: `project_id=${encodeURIComponent(projectId)}&user_id=<?= $user_id ?>&project_type=${encodeURIComponent(projectType)}`
             }).then(response => response.json()).then(data => {
                 const predecessorDropdown = document.getElementById('predecessor_task_id');
                 predecessorDropdown.innerHTML = '<option value="">Select a predecessor task</option>';
@@ -2005,7 +2008,12 @@ function getWeekdayHours($start, $end)
         document.getElementById('project_name_dropdown').addEventListener('change', function () {
             fetchPredecessorTasks(this.value);
         });
-
+        document.getElementById('project_type').addEventListener('change', function () {
+            const projectId = document.getElementById('project_name_dropdown').value;
+            if (projectId) {
+                fetchPredecessorTasks(projectId);
+            }
+        });
         document.getElementById('manageProjectForm').addEventListener('submit', function (event) {
             event.preventDefault();
             fetch('manage-project.php', { method: 'POST', body: new FormData(this) }).then(response => response.json()).then(data => {
