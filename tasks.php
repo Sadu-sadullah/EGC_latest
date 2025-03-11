@@ -983,8 +983,9 @@ function getWeekdayHours($start, $end)
                         <input type="hidden" name="project_id" id="project_id" value="">
                         <input type="hidden" name="action" id="project_action" value="create">
                         <input type="hidden" name="created_by_user_id" value="<?= $user_id ?>">
-                        <button type="submit" class="btn btn-primary">Create Project</button>
-                        <button type="button" class="btn btn-warning" onclick="editProject()">Edit Project</button>
+                        <button type="submit" class="btn btn-primary" id="submitProjectBtn">Create Project</button>
+                        <button type="button" class="btn btn-warning" id="editProjectBtn" onclick="editProject()">Edit
+                            Project</button>
                         <button type="button" class="btn btn-danger" onclick="deleteProject()">Delete Project</button>
                     </form>
                 </div>
@@ -2015,6 +2016,85 @@ function getWeekdayHours($start, $end)
             }
         });
         document.getElementById('manageProjectForm').addEventListener('submit', function (event) {
+            event.preventDefault(); // Prevent default form submission
+            event.stopImmediatePropagation(); // Prevent multiple triggers of the same event
+
+            const form = this;
+            const submitBtn = document.getElementById('submitProjectBtn');
+            submitBtn.disabled = true; // Disable button to prevent multiple submissions
+
+            fetch('manage-project.php', {
+                method: 'POST',
+                body: new FormData(form)
+            })
+                .then(response => response.json())
+                .then(data => {
+                    alert(data.message); // Show message regardless of success for clarity
+                    if (data.success) {
+                        location.reload(); // Reload only on success
+                    }
+                })
+                .catch(error => {
+                    console.error('Error submitting form:', error);
+                    alert('Error submitting form.');
+                })
+                .finally(() => {
+                    submitBtn.disabled = false; // Re-enable button after request completes
+                });
+        }, { once: true }); // Ensure listener is added only once
+
+        // Reset form to "create" mode when modal opens or project selection changes
+        document.getElementById('createProjectModal').addEventListener('show.bs.modal', function () {
+            resetProjectForm();
+        });
+
+        document.getElementById('existing_projects').addEventListener('change', function () {
+            resetProjectForm();
+            const projectId = this.value;
+            if (projectId) {
+                fetchProjectDetails(projectId); // Optional: Pre-fill on selection
+            }
+        });
+
+        function resetProjectForm() {
+            document.getElementById('new_project_name').value = '';
+            document.getElementById('project_id').value = '';
+            document.getElementById('project_action').value = 'create';
+            document.getElementById('submitProjectBtn').textContent = 'Create Project';
+        }
+
+        function fetchProjectDetails(projectId) {
+            fetch('get-project-details.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `project_id=${encodeURIComponent(projectId)}`
+            }).then(response => response.json()).then(data => {
+                if (data.success) {
+                    document.getElementById('new_project_name').value = data.project_name;
+                    document.getElementById('project_id').value = projectId;
+                    document.getElementById('project_action').value = 'edit';
+                    document.getElementById('submitProjectBtn').textContent = 'Update Project';
+                } else {
+                    alert(data.message);
+                    resetProjectForm();
+                }
+            }).catch(error => {
+                console.error('Error fetching project details:', error);
+                alert('Error fetching project details.');
+                resetProjectForm();
+            });
+        }
+
+        function editProject() {
+            const projectId = document.getElementById('existing_projects').value;
+            if (!projectId) {
+                alert('Please select a project to edit.');
+                return;
+            }
+            fetchProjectDetails(projectId);
+        }
+
+        document.getElementById('manageProjectForm').addEventListener('submit', function (event) {
             event.preventDefault();
             fetch('manage-project.php', { method: 'POST', body: new FormData(this) }).then(response => response.json()).then(data => {
                 if (data.success) {
@@ -2029,53 +2109,57 @@ function getWeekdayHours($start, $end)
             });
         });
 
-        function editProject() {
-            const projectId = document.getElementById('existing_projects').value;
-            if (!projectId) {
-                alert('Please select a project to edit.');
-                return;
-            }
-            fetch('get-project-details.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: `project_id=${projectId}`
-            }).then(response => response.json()).then(data => {
-                if (data.success) {
-                    document.getElementById('new_project_name').value = data.project_name;
-                    document.getElementById('project_id').value = projectId;
-                    document.getElementById('project_action').value = 'edit';
-                } else {
-                    alert(data.message);
-                }
-            }).catch(error => {
-                console.error('Error fetching project details:', error);
-                alert('Error fetching project details.');
-            });
-        }
-
         function deleteProject() {
             const projectId = document.getElementById('existing_projects').value;
             if (!projectId) {
                 alert('Please select a project to delete.');
                 return;
             }
-            if (confirm('Are you sure you want to delete this project?')) {
-                fetch('manage-project.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: `action=delete&project_id=${projectId}`
-                }).then(response => response.json()).then(data => {
-                    if (data.success) {
-                        alert(data.message);
-                        location.reload();
-                    } else {
-                        alert(data.message);
+
+            // First, check if there are tasks associated with the project
+            fetch('manage-project.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `action=check_tasks&project_id=${encodeURIComponent(projectId)}`
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.success) {
+                        alert(data.message); // E.g., "Error checking tasks for this project."
+                        return;
                     }
-                }).catch(error => {
-                    console.error('Error deleting project:', error);
-                    alert('Error deleting project.');
+
+                    if (data.task_count > 0) {
+                        alert(`Cannot delete project. There are ${data.task_count} task(s) associated with it. Please delete or reassign these tasks first.`);
+                        return;
+                    }
+
+                    // If no tasks, proceed with deletion confirmation
+                    if (confirm('Are you sure you want to delete this project?')) {
+                        fetch('manage-project.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: `action=delete&project_id=${encodeURIComponent(projectId)}`
+                        })
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data.success) {
+                                    alert(data.message);
+                                    location.reload();
+                                } else {
+                                    alert(data.message);
+                                }
+                            })
+                            .catch(error => {
+                                console.error('Error deleting project:', error);
+                                alert('Error deleting project.');
+                            });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking tasks for project:', error);
+                    alert('Error checking tasks for project.');
                 });
-            }
         }
     </script>
 </body>
