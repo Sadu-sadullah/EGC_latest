@@ -406,6 +406,9 @@ function formatPermissionName($permissionName)
             <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
                 <a href="task-actions.php">Task Actions</a>
             <?php endif; ?>
+<?php if (hasPermission('tasks_archive')): ?>
+                <a href="archived-tasks.php">Tasks Archive</a>
+            <?php endif; ?>
             <?php if (hasPermission('read_users')): ?>
                 <a href="view-users.php">View Users</a>
             <?php endif; ?>

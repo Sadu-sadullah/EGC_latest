@@ -174,74 +174,306 @@ $completedTasks = array_filter($allTasks, function ($task) {
 
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Task Actions</title>
     <link rel="icon" type="image/png" sizes="56x56" href="images/logo/logo-2.1.ico" />
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
     <style>
-        body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; }
-        * { box-sizing: border-box; }
-        .task-container { width: 100%; max-width: 1400px; margin: 25px auto; background-color: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); }
-        h2 { text-align: center; color: #333; margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
-        th { background-color: #002c5f; color: white; }
-        tr:nth-child(even) { background-color: #f9f9f9; }
-        .filter-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 20px; }
-        .filter-buttons { margin-bottom: 15px; text-align: center; }
-        .filter-buttons .btn { margin: 5px; padding: 10px 20px; background-color: #002c5f; color: white; border: none; border-radius: 5px; font-size: 14px; cursor: pointer; transition: background-color 0.3s; }
-        .filter-buttons .btn:hover { background-color: #004080; }
-        .filter-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; width: 100%; }
-        .filter-dropdown { margin-bottom: 15px; flex: 1 1 300px; max-width: 100%; }
-        .filter-dropdown label { font-weight: bold; color: #333; display: block; margin-bottom: 5px; }
-        .filter-dropdown select, .filter-dropdown input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
-        .filter-date { display: flex; gap: 10px; align-items: center; flex: 1 1 300px; max-width: 100%; }
-        .filter-date .filter-dropdown { margin-bottom: 0; flex: 1 1 150px; }
-        .pagination { display: flex; justify-content: center; margin-top: 20px; }
-        .pagination a { margin: 0 5px; padding: 5px 10px; text-decoration: none; color: #002c5f; border: 1px solid #002c5f; border-radius: 5px; }
-        .pagination a.active { background-color: #002c5f; color: white; }
-        .pagination a:hover { background-color: #004080; color: white; }
-        .dashboard-container { display: flex; min-height: 100vh; }
-        .sidebar { width: 250px; background-color: #002c5f; color: white; padding: 20px; }
-        .sidebar a { color: white; text-decoration: none; display: block; padding: 10px; margin: 5px 0; border-radius: 5px; transition: background-color 0.3s; }
-        .sidebar a:hover { background-color: #004080; }
-        .main-content { flex-grow: 1; padding: 20px; background-color: #ffffff; }
-        .navbar { display: flex; align-items: center; padding: 10px 20px; background-color: #ffffff; border-radius: 10px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
-        .user-info { margin-right: 20px; font-size: 14px; }
-        .back-btn { background-color: #002c5f; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; transition: background-color 0.3s; }
-        .back-btn:hover { background-color: #004080; }
-        .status-filter-container { margin-bottom: 15px; display: flex; align-items: center; gap: 10px; }
-        .status-filter-container label { font-weight: bold; color: #333; margin-bottom: 0; }
-        #status-filter { width: 300px; }
-        .button-container { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
-        .button-container .btn { width: 100%; text-align: center; padding: 0.375rem 0.75rem; display: flex; justify-content: center; align-items: center; }
-        .edit-button { background-color: #457b9d; color: white; text-decoration: none; border-radius: 5px; font-size: 0.9rem; transition: background-color 0.3s ease; }
-        .edit-button:hover { background-color: #1d3557; }
-        .delete-button { background-color: #e63946; color: white; text-decoration: none; border-radius: 5px; font-size: 0.9rem; border: none; cursor: pointer; transition: background-color 0.3s ease; }
-        .delete-button:hover { background-color: #d62828; }
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        .task-container {
+            width: 100%;
+            max-width: 1400px;
+            margin: 25px auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h2 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th,
+        td {
+            border: 1px solid #ccc;
+            padding: 10px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #002c5f;
+            color: white;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        .filter-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .filter-buttons {
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .filter-buttons .btn {
+            margin: 5px;
+            padding: 10px 20px;
+            background-color: #002c5f;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .filter-buttons .btn:hover {
+            background-color: #004080;
+        }
+
+        .filter-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+        }
+
+        .filter-dropdown {
+            margin-bottom: 15px;
+            flex: 1 1 300px;
+            max-width: 100%;
+        }
+
+        .filter-dropdown label {
+            font-weight: bold;
+            color: #333;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .filter-dropdown select,
+        .filter-dropdown input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .filter-date {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex: 1 1 300px;
+            max-width: 100%;
+        }
+
+        .filter-date .filter-dropdown {
+            margin-bottom: 0;
+            flex: 1 1 150px;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        .pagination a {
+            margin: 0 5px;
+            padding: 5px 10px;
+            text-decoration: none;
+            color: #002c5f;
+            border: 1px solid #002c5f;
+            border-radius: 5px;
+        }
+
+        .pagination a.active {
+            background-color: #002c5f;
+            color: white;
+        }
+
+        .pagination a:hover {
+            background-color: #004080;
+            color: white;
+        }
+
+        .dashboard-container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            width: 250px;
+            background-color: #002c5f;
+            color: white;
+            padding: 20px;
+        }
+
+        .sidebar a {
+            color: white;
+            text-decoration: none;
+            display: block;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+
+        .sidebar a:hover {
+            background-color: #004080;
+        }
+
+        .main-content {
+            flex-grow: 1;
+            padding: 20px;
+            background-color: #ffffff;
+        }
+
+        .navbar {
+            display: flex;
+            align-items: center;
+            padding: 10px 20px;
+            background-color: #ffffff;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .user-info {
+            margin-right: 20px;
+            font-size: 14px;
+        }
+
+        .back-btn {
+            background-color: #002c5f;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .back-btn:hover {
+            background-color: #004080;
+        }
+
+        .status-filter-container {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-filter-container label {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 0;
+        }
+
+        #status-filter {
+            width: 300px;
+        }
+
+        .button-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: stretch;
+        }
+
+        .button-container .btn {
+            width: 100%;
+            text-align: center;
+            padding: 0.375rem 0.75rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .edit-button {
+            background-color: #457b9d;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 0.9rem;
+            transition: background-color 0.3s ease;
+        }
+
+        .edit-button:hover {
+            background-color: #1d3557;
+        }
+
+        .delete-button {
+            background-color: #e63946;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 0.9rem;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .delete-button:hover {
+            background-color: #d62828;
+        }
     </style>
 </head>
+
 <body>
     <div class="dashboard-container">
-    <div class="sidebar">
-    <h3>TMS</h3>
-    <a href="tasks.php">Tasks</a>
-    <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
-        <a href="task-actions.php">Task Actions</a>
-    <?php endif; ?>
-    <?php if (hasPermission('read_users')): ?>
-        <a href="view-users.php">View Users</a>
-    <?php endif; ?>
-    <?php if (hasPermission('read_roles_&_departments')): ?>
-        <a href="view-roles-departments.php">View Role or Department</a>
-    <?php endif; ?>
-    <?php if (hasPermission('read_&_write_privileges')): ?>
-        <a href="assign-privilege.php">Assign & View Privileges</a>
-    <?php endif; ?>
-</div>
+        <div class="sidebar">
+            <h3>TMS</h3>
+            <a href="tasks.php">Tasks</a>
+            <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
+                <a href="task-actions.php">Task Actions</a>
+            <?php endif; ?>
+            <?php if (hasPermission('tasks_archive')): ?>
+                <a href="archived-tasks.php">Tasks Archive</a>
+            <?php endif; ?>
+            <?php if (hasPermission('read_users')): ?>
+                <a href="view-users.php">View Users</a>
+            <?php endif; ?>
+            <?php if (hasPermission('read_roles_&_departments')): ?>
+                <a href="view-roles-departments.php">View Role or Department</a>
+            <?php endif; ?>
+            <?php if (hasPermission('read_&_write_privileges')): ?>
+                <a href="assign-privilege.php">Assign & View Privileges</a>
+            <?php endif; ?>
+        </div>
 
         <div class="main-content">
             <div class="navbar">
@@ -250,7 +482,9 @@ $completedTasks = array_filter($allTasks, function ($task) {
                 </div>
                 <div class="user-info me-3 ms-auto">
                     <p class="mb-0">Logged in as: <strong><?= htmlspecialchars($loggedInUsername) ?></strong></p>
-                    <p class="mb-0">Departments: <strong><?= htmlspecialchars($loggedInDepartment ?? 'Unknown') ?></strong></p>
+                    <p class="mb-0">Departments:
+                        <strong><?= htmlspecialchars($loggedInDepartment ?? 'Unknown') ?></strong>
+                    </p>
                 </div>
                 <button class="back-btn" onclick="window.location.href='welcome.php'">Dashboard</button>
             </div>
@@ -268,7 +502,9 @@ $completedTasks = array_filter($allTasks, function ($task) {
                                 <select id="project-filter" multiple="multiple">
                                     <option value="All">All</option>
                                     <?php foreach ($projects as $project): ?>
-                                        <option value="<?= htmlspecialchars($project['project_name']) ?>"><?= htmlspecialchars($project['project_name']) ?></option>
+                                        <option value="<?= htmlspecialchars($project['project_name']) ?>">
+                                            <?= htmlspecialchars($project['project_name']) ?>
+                                        </option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
@@ -278,7 +514,9 @@ $completedTasks = array_filter($allTasks, function ($task) {
                                     <select id="department-filter" multiple="multiple">
                                         <option value="All">All</option>
                                         <?php foreach ($departments as $department): ?>
-                                            <option value="<?= htmlspecialchars($department['name']) ?>"><?= htmlspecialchars($department['name']) ?></option>
+                                            <option value="<?= htmlspecialchars($department['name']) ?>">
+                                                <?= htmlspecialchars($department['name']) ?>
+                                            </option>
                                         <?php endforeach; ?>
                                     </select>
                                 </div>
@@ -322,43 +560,57 @@ $completedTasks = array_filter($allTasks, function ($task) {
                             </tr>
                         </thead>
                         <tbody>
-                            <?php $taskCountStart = 1; foreach ($pendingStartedTasks as $row): ?>
+                            <?php $taskCountStart = 1;
+                            foreach ($pendingStartedTasks as $row): ?>
                                 <tr class="align-middle" data-task-id="<?= htmlspecialchars($row['task_id']) ?>">
                                     <td><?= $taskCountStart++ ?></td>
                                     <td><?= htmlspecialchars($row['project_name']) ?></td>
                                     <td><?= htmlspecialchars($row['task_name']) ?></td>
-                                    <td><?= htmlspecialchars($row['assigned_to']) ?> (<?= htmlspecialchars($row['assigned_to_department']) ?>)</td>
+                                    <td><?= htmlspecialchars($row['assigned_to']) ?>
+                                        (<?= htmlspecialchars($row['assigned_to_department']) ?>)</td>
                                     <?php if ((hasPermission('update_tasks') && $row['assigned_by_id'] == $user_id) || hasPermission('update_tasks_all')): ?>
                                         <td>
                                             <div class="button-container">
-                                                <a href="edit-tasks.php?id=<?= $row['task_id'] ?>" class="edit-button btn">Edit</a>
-                                                <button type="button" class="delete-button btn" data-bs-toggle="modal" data-bs-target="#deleteModal<?= $row['task_id'] ?>">Delete</button>
-                                                <a href="#" class="btn btn-secondary view-timeline-btn" data-task-id="<?= $row['task_id'] ?>">View Timeline</a>
+                                                <a href="edit-tasks.php?id=<?= $row['task_id'] ?>"
+                                                    class="edit-button btn">Edit</a>
+                                                <button type="button" class="delete-button btn" data-bs-toggle="modal"
+                                                    data-bs-target="#deleteModal<?= $row['task_id'] ?>">Delete</button>
+                                                <a href="#" class="btn btn-secondary view-timeline-btn"
+                                                    data-task-id="<?= $row['task_id'] ?>">View Timeline</a>
                                             </div>
                                         </td>
                                     <?php endif; ?>
                                 </tr>
 
-                                <div class="modal fade" id="deleteModal<?= $row['task_id'] ?>" tabindex="-1" aria-labelledby="deleteModalLabel<?= $row['task_id'] ?>" aria-hidden="true">
+                                <div class="modal fade" id="deleteModal<?= $row['task_id'] ?>" tabindex="-1"
+                                    aria-labelledby="deleteModalLabel<?= $row['task_id'] ?>" aria-hidden="true">
                                     <div class="modal-dialog">
                                         <div class="modal-content">
                                             <div class="modal-header">
-                                                <h5 class="modal-title" id="deleteModalLabel<?= $row['task_id'] ?>">Delete Task</h5>
-                                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                                <h5 class="modal-title" id="deleteModalLabel<?= $row['task_id'] ?>">Delete
+                                                    Task</h5>
+                                                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                                    aria-label="Close"></button>
                                             </div>
                                             <div class="modal-body">
-                                                <p>Are you sure you want to delete the task "<strong><?= htmlspecialchars($row['task_name']) ?></strong>"?</p>
-                                                <form id="deleteForm<?= $row['task_id'] ?>" method="POST" action="delete-task.php">
+                                                <p>Are you sure you want to delete the task
+                                                    "<strong><?= htmlspecialchars($row['task_name']) ?></strong>"?</p>
+                                                <form id="deleteForm<?= $row['task_id'] ?>" method="POST"
+                                                    action="delete-task.php">
                                                     <input type="hidden" name="task_id" value="<?= $row['task_id'] ?>">
                                                     <div class="mb-3">
-                                                        <label for="reason<?= $row['task_id'] ?>" class="form-label">Reason for Deletion</label>
-                                                        <textarea class="form-control" id="reason<?= $row['task_id'] ?>" name="reason" rows="3" required></textarea>
+                                                        <label for="reason<?= $row['task_id'] ?>" class="form-label">Reason
+                                                            for Deletion</label>
+                                                        <textarea class="form-control" id="reason<?= $row['task_id'] ?>"
+                                                            name="reason" rows="3" required></textarea>
                                                     </div>
                                                 </form>
                                             </div>
                                             <div class="modal-footer">
-                                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                                                <button type="submit" class="btn btn-danger" form="deleteForm<?= $row['task_id'] ?>">Delete</button>
+                                                <button type="button" class="btn btn-secondary"
+                                                    data-bs-dismiss="modal">Cancel</button>
+                                                <button type="submit" class="btn btn-danger"
+                                                    form="deleteForm<?= $row['task_id'] ?>">Delete</button>
                                             </div>
                                         </div>
                                     </div>
@@ -366,7 +618,8 @@ $completedTasks = array_filter($allTasks, function ($task) {
                             <?php endforeach; ?>
                         </tbody>
                     </table>
-                    <div id="no-data-alert-pending" class="alert alert-warning mt-3" style="display: none;">No data to be displayed.</div>
+                    <div id="no-data-alert-pending" class="alert alert-warning mt-3" style="display: none;">No data to
+                        be displayed.</div>
 
                     <h3>Completed Tasks</h3>
                     <table class="table table-striped table-hover align-middle text-center" id="remaining-tasks">
@@ -382,16 +635,19 @@ $completedTasks = array_filter($allTasks, function ($task) {
                             </tr>
                         </thead>
                         <tbody>
-                            <?php $taskCountStart = 1; foreach ($completedTasks as $row): ?>
+                            <?php $taskCountStart = 1;
+                            foreach ($completedTasks as $row): ?>
                                 <tr class="align-middle" data-task-id="<?= htmlspecialchars($row['task_id']) ?>">
                                     <td><?= $taskCountStart++ ?></td>
                                     <td><?= htmlspecialchars($row['project_name']) ?></td>
                                     <td><?= htmlspecialchars($row['task_name']) ?></td>
-                                    <td><?= htmlspecialchars($row['assigned_to']) ?> (<?= htmlspecialchars($row['assigned_to_department']) ?>)</td>
+                                    <td><?= htmlspecialchars($row['assigned_to']) ?>
+                                        (<?= htmlspecialchars($row['assigned_to_department']) ?>)</td>
                                     <?php if ((hasPermission('update_tasks') && $row['assigned_by_id'] == $user_id) || hasPermission('update_tasks_all')): ?>
                                         <td>
                                             <div class="button-container">
-                                                <a href="#" class="btn btn-secondary view-timeline-btn" data-task-id="<?= $row['task_id'] ?>">View Timeline</a>
+                                                <a href="#" class="btn btn-secondary view-timeline-btn"
+                                                    data-task-id="<?= $row['task_id'] ?>">View Timeline</a>
                                             </div>
                                         </td>
                                     <?php endif; ?>
@@ -399,14 +655,16 @@ $completedTasks = array_filter($allTasks, function ($task) {
                             <?php endforeach; ?>
                         </tbody>
                     </table>
-                    <div id="no-data-alert-completed" class="alert alert-warning mt-3" style="display: none;">No data to be displayed.</div>
+                    <div id="no-data-alert-completed" class="alert alert-warning mt-3" style="display: none;">No data to
+                        be displayed.</div>
                     <div class="pagination"></div>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="modal fade" id="taskTimelineModal" tabindex="-1" aria-labelledby="taskTimelineModalLabel" aria-hidden="true">
+    <div class="modal fade" id="taskTimelineModal" tabindex="-1" aria-labelledby="taskTimelineModalLabel"
+        aria-hidden="true">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
@@ -424,7 +682,9 @@ $completedTasks = array_filter($allTasks, function ($task) {
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+        crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
     <script>
         $(document).ready(function () {
@@ -586,5 +846,6 @@ $completedTasks = array_filter($allTasks, function ($task) {
         });
     </script>
 </body>
+
 </html>
 <?php $conn->close(); ?>

@@ -378,21 +378,24 @@ try {
 <body>
     <div class="dashboard-container">
         <div class="sidebar">
-    <h3>TMS</h3>
-    <a href="tasks.php">Tasks</a>
-    <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
-        <a href="task-actions.php">Task Actions</a>
-    <?php endif; ?>
-    <?php if (hasPermission('read_users')): ?>
-        <a href="view-users.php">View Users</a>
-    <?php endif; ?>
-    <?php if (hasPermission('read_roles_&_departments')): ?>
-        <a href="view-roles-departments.php">View Role or Department</a>
-    <?php endif; ?>
-    <?php if (hasPermission('read_&_write_privileges')): ?>
-        <a href="assign-privilege.php">Assign & View Privileges</a>
-    <?php endif; ?>
-</div>
+            <h3>TMS</h3>
+            <a href="tasks.php">Tasks</a>
+            <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
+                <a href="task-actions.php">Task Actions</a>
+            <?php endif; ?>
+            <?php if (hasPermission('tasks_archive')): ?>
+                <a href="archived-tasks.php">Tasks Archive</a>
+            <?php endif; ?>
+            <?php if (hasPermission('read_users')): ?>
+                <a href="view-users.php">View Users</a>
+            <?php endif; ?>
+            <?php if (hasPermission('read_roles_&_departments')): ?>
+                <a href="view-roles-departments.php">View Role or Department</a>
+            <?php endif; ?>
+            <?php if (hasPermission('read_&_write_privileges')): ?>
+                <a href="assign-privilege.php">Assign & View Privileges</a>
+            <?php endif; ?>
+        </div>
 
         <!-- Main Content -->
         <div class="main-content">
