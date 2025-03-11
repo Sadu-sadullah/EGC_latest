@@ -185,6 +185,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
     $assigned_by_id = $_SESSION['user_id'];
     $predecessor_task_id = !empty($_POST['predecessor_task_id']) ? (int) $_POST['predecessor_task_id'] : null;
 
+    // New external project fields (optional)
+    $customer_name = $project_type === 'External' ? trim($_POST['customer_name'] ?? '') : null;
+    $customer_email = $project_type === 'External' ? trim($_POST['customer_email'] ?? '') : null;
+    $customer_mobile = $project_type === 'External' ? trim($_POST['customer_mobile'] ?? '') : null;
+    $cost = $project_type === 'External' && !empty($_POST['cost']) ? (float) $_POST['cost'] : null;
+    $project_manager = $project_type === 'External' ? trim($_POST['project_manager'] ?? '') : null;
+
     $currentDate = new DateTime();
     $datePlannedStartDate = new DateTime($planned_start_date);
     $datePlannedEndDate = new DateTime($planned_finish_date);
@@ -196,17 +203,44 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
     } elseif ($datePlannedStartDate < $threeMonthsAgo || $datePlannedEndDate > $threeMonthsAhead) {
         echo '<script>alert("Error: Planned start date is too far in the past or too far in the future.");</script>';
     } else {
-        $placeholders = ['user_id', 'project_id', 'task_name', 'task_description', 'project_type', 'planned_start_date', 'planned_finish_date', 'status', 'recorded_timestamp', 'assigned_by_id'];
+        $placeholders = [
+            'user_id',
+            'project_id',
+            'task_name',
+            'task_description',
+            'project_type',
+            'planned_start_date',
+            'planned_finish_date',
+            'status',
+            'recorded_timestamp',
+            'assigned_by_id'
+        ];
+        $params = [$assigned_user_id, $project_id, $task_name, $task_description, $project_type, $planned_start_date, $planned_finish_date, $status, $recorded_timestamp, $assigned_by_id];
+        $types = str_repeat('s', count($params));
+
         if ($predecessor_task_id !== null) {
             $placeholders[] = 'predecessor_task_id';
+            $params[] = $predecessor_task_id;
+            $types .= 'i';
         }
+
+        // Add external project fields if applicable
+        if ($project_type === 'External') {
+            $placeholders[] = 'customer_name';
+            $placeholders[] = 'customer_email';
+            $placeholders[] = 'customer_mobile';
+            $placeholders[] = 'cost';
+            $placeholders[] = 'project_manager';
+            $params[] = $customer_name;
+            $params[] = $customer_email;
+            $params[] = $customer_mobile;
+            $params[] = $cost;
+            $params[] = $project_manager;
+            $types .= 'sssds'; // string, string, string, double, string
+        }
+
         $sql = "INSERT INTO tasks (" . implode(", ", $placeholders) . ") VALUES (" . str_repeat('?,', count($placeholders) - 1) . "?)";
         $stmt = $conn->prepare($sql);
-        $params = [$assigned_user_id, $project_id, $task_name, $task_description, $project_type, $planned_start_date, $planned_finish_date, $status, $recorded_timestamp, $assigned_by_id];
-        if ($predecessor_task_id !== null) {
-            $params[] = $predecessor_task_id;
-        }
-        $types = str_repeat('s', count($params) - 1) . 'i';
         $stmt->bind_param($types, ...$params);
 
         if ($stmt->execute()) {
@@ -238,7 +272,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
             header("Location: tasks.php");
             exit;
         } else {
-            echo '<script>alert("Failed to add task.");</script>';
+            echo '<script>alert("Failed to add task: ' . $conn->error . '");</script>';
         }
         $stmt->close();
     }
@@ -261,6 +295,11 @@ if (hasPermission('view_all_tasks')) {
             tasks.assigned_by_id,
             tasks.user_id,
             tasks.predecessor_task_id,
+            tasks.customer_name,
+            tasks.customer_email,
+            tasks.customer_mobile,
+            tasks.cost,
+            tasks.project_manager,
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
@@ -306,6 +345,11 @@ if (hasPermission('view_all_tasks')) {
             tasks.assigned_by_id,
             tasks.user_id,
             tasks.predecessor_task_id,
+            tasks.customer_name,
+            tasks.customer_email,
+            tasks.customer_mobile,
+            tasks.cost,
+            tasks.project_manager,
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
@@ -352,6 +396,11 @@ if (hasPermission('view_all_tasks')) {
             tasks.assigned_by_id,
             tasks.user_id,
             tasks.predecessor_task_id,
+            tasks.customer_name,
+            tasks.customer_email,
+            tasks.customer_mobile,
+            tasks.cost,
+            tasks.project_manager,
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
@@ -420,12 +469,27 @@ foreach ($allTasks as &$task) {
 }
 
 $pendingStartedTasks = array_filter($allTasks, function ($task) {
-    return in_array($task['status'], ['Assigned', 'In Progress', 'Hold', 'Reinstated', 'Reassigned', 'Cancelled']);
+    return in_array($task['status'], ['Assigned', 'In Progress', 'Hold', 'Reassigned', 'Reinstated']);
 });
 
 $completedTasks = array_filter($allTasks, function ($task) {
-    return in_array($task['status'], ['Completed on Time', 'Delayed Completion', 'Closed']);
+    return in_array($task['status'], ['Completed on Time', 'Delayed Completion', 'Closed', 'Cancelled']);
 });
+
+// Check if any task is external
+$hasExternalTasks = false;
+foreach ($allTasks as $task) {
+    if ($task['project_type'] === 'External') {
+        $hasExternalTasks = true;
+        break;
+    }
+}
+
+// Reset array keys to ensure sequential indices
+$pendingStartedTasks = array_values($pendingStartedTasks);
+
+// Track rendered task IDs to prevent duplicates
+$renderedTaskIds = [];
 
 // Calculate task counts by status
 $statusCounts = array_count_values(array_column($allTasks, 'status'));
@@ -874,6 +938,16 @@ function getWeekdayHours($start, $end)
             font-weight: bold;
             color: #002c5f;
         }
+
+        .external-only {
+            display: none;
+            /* Hidden by default */
+        }
+
+        tr[data-project-type="External"] .external-only {
+            display: table-cell;
+            /* Shown only for external projects */
+        }
     </style>
 </head>
 
@@ -912,15 +986,38 @@ function getWeekdayHours($start, $end)
                         </div>
                         <div class="form-group">
                             <label for="task_description">Task Description:</label>
-                            <textarea id="task_description" name="task_description" rows="4"
-                                class="form-control"></textarea>
+                            <textarea id="task_description" name="task_description" rows="4" class="form-control"
+                                required></textarea>
                         </div>
                         <div class="form-group">
                             <label for="project_type">Project Type:</label>
-                            <select id="project_type" name="project_type" class="form-control">
+                            <select id="project_type" name="project_type" class="form-control" required>
                                 <option value="Internal">Internal</option>
                                 <option value="External">External</option>
                             </select>
+                        </div>
+                        <!-- External Project Fields (hidden by default) -->
+                        <div id="external-fields" style="display: none;">
+                            <div class="form-group">
+                                <label for="customer_name">Customer Name:</label>
+                                <input type="text" id="customer_name" name="customer_name" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="customer_email">Customer Email:</label>
+                                <input type="email" id="customer_email" name="customer_email" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="customer_mobile">Customer Mobile:</label>
+                                <input type="text" id="customer_mobile" name="customer_mobile" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="cost">Cost:</label>
+                                <input type="number" id="cost" name="cost" class="form-control" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="project_manager">Project Manager:</label>
+                                <input type="text" id="project_manager" name="project_manager" class="form-control">
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="planned_start_date">Expected Start Date & Time</label>
@@ -1140,11 +1237,24 @@ function getWeekdayHours($start, $end)
                                 <?php endif; ?>
                                 <th>Created On</th>
                                 <th>Predecessor Task</th>
+                                <?php if ($hasExternalTasks): ?>
+                                    <th>Customer Name</th>
+                                    <th>Customer Email</th>
+                                    <th>Customer Mobile</th>
+                                    <th>Cost</th>
+                                    <th>Project Manager</th>
+                                <?php endif; ?>
                             </tr>
                         </thead>
                         <tbody>
                             <?php $taskCountStart = 1;
-                            foreach ($pendingStartedTasks as $row): ?>
+                            foreach ($pendingStartedTasks as $index => $row):
+                                // Skip if task ID has already been rendered
+                                if (in_array($row['task_id'], $renderedTaskIds)) {
+                                    continue;
+                                }
+                                $renderedTaskIds[] = $row['task_id'];
+                                ?>
                                 <tr class="align-middle" data-task-id="<?= htmlspecialchars($row['task_id']) ?>"
                                     data-predecessor-task-id="<?= htmlspecialchars($row['predecessor_task_id'] ?? '') ?>">
                                     <td><?= $taskCountStart++ ?></td>
@@ -1247,6 +1357,22 @@ function getWeekdayHours($start, $end)
                                         <?= htmlspecialchars(date("d M Y, h:i A", strtotime($row['recorded_timestamp']))) ?>
                                     </td>
                                     <td><?= htmlspecialchars($row['predecessor_task_name'] ?? 'N/A') ?></td>
+                                    <?php if ($row['project_type'] === 'External'): ?>
+                                        <td><?= htmlspecialchars($row['customer_name'] ?? 'N/A') ?></td>
+                                        <td><?= htmlspecialchars($row['customer_email'] ?? 'N/A') ?></td>
+                                        <td><?= htmlspecialchars($row['customer_mobile'] ?? 'N/A') ?></td>
+                                        <td><?= $row['cost'] !== null ? htmlspecialchars(number_format($row['cost'], 2)) : 'N/A' ?>
+                                        </td>
+                                        <td><?= htmlspecialchars($row['project_manager'] ?? 'N/A') ?></td>
+                                    <?php else: ?>
+                                        <?php if ($hasExternalTasks): ?>
+                                            <td>N/A</td>
+                                            <td>N/A</td>
+                                            <td>N/A</td>
+                                            <td>N/A</td>
+                                            <td>N/A</td>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -1277,6 +1403,13 @@ function getWeekdayHours($start, $end)
                                 <?php endif; ?>
                                 <th>Created On</th>
                                 <th>Predecessor Task</th>
+                                <?php if ($hasExternalTasks): ?>
+                                    <th>Customer Name</th>
+                                    <th>Customer Email</th>
+                                    <th>Customer Mobile</th>
+                                    <th>Cost</th>
+                                    <th>Project Manager</th>
+                                <?php endif; ?>
                             </tr>
                         </thead>
                         <tbody>
@@ -1286,8 +1419,9 @@ function getWeekdayHours($start, $end)
                                 $isClosedFromDelayedCompletion = $row['status'] === 'Closed' && $row['delayed_reason'];
                                 ?>
                                 <tr data-project="<?= htmlspecialchars($row['project_name']) ?>"
-                                    data-status="<?= htmlspecialchars($row['status']) ?>" class="align-middle <?php if ($row['status'] === 'Delayed Completion' || $isClosedFromDelayedCompletion)
-                                          echo 'delayed-task'; ?>">
+                                    data-status="<?= htmlspecialchars($row['status']) ?>"
+                                    class="align-middle <?php if ($row['status'] === 'Delayed Completion' || $isClosedFromDelayedCompletion)
+                                        echo 'delayed-task'; ?>">
                                     <td><?= $taskCountStart++ ?></td>
                                     <td><?= htmlspecialchars($row['project_name']) ?></td>
                                     <td>
@@ -1388,6 +1522,22 @@ function getWeekdayHours($start, $end)
                                         <?= htmlspecialchars(date("d M Y, h:i A", strtotime($row['recorded_timestamp']))) ?>
                                     </td>
                                     <td><?= htmlspecialchars($row['predecessor_task_name'] ?? 'N/A') ?></td>
+                                    <?php if ($row['project_type'] === 'External'): ?>
+                                        <td><?= htmlspecialchars($row['customer_name'] ?? 'N/A') ?></td>
+                                        <td><?= htmlspecialchars($row['customer_email'] ?? 'N/A') ?></td>
+                                        <td><?= htmlspecialchars($row['customer_mobile'] ?? 'N/A') ?></td>
+                                        <td><?= $row['cost'] !== null ? htmlspecialchars(number_format($row['cost'], 2)) : 'N/A' ?>
+                                        </td>
+                                        <td><?= htmlspecialchars($row['project_manager'] ?? 'N/A') ?></td>
+                                    <?php else: ?>
+                                        <?php if ($hasExternalTasks): ?>
+                                            <td>N/A</td>
+                                            <td>N/A</td>
+                                            <td>N/A</td>
+                                            <td>N/A</td>
+                                            <td>N/A</td>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -2164,6 +2314,30 @@ function getWeekdayHours($start, $end)
                     alert('Error checking tasks for project.');
                 });
         }
+
+        document.getElementById('project_type').addEventListener('change', function () {
+            const externalFields = document.getElementById('external-fields');
+            const projectId = document.getElementById('project_name_dropdown').value;
+            if (this.value === 'External') {
+                externalFields.style.display = 'block';
+            } else {
+                externalFields.style.display = 'none';
+            }
+            if (projectId) {
+                fetchPredecessorTasks(projectId); // Refresh predecessor tasks if project is selected
+            }
+        });
+
+        // Show external fields when modal opens if "External" is already selected
+        document.getElementById('taskManagementModal').addEventListener('show.bs.modal', function () {
+            const projectType = document.getElementById('project_type').value;
+            const externalFields = document.getElementById('external-fields');
+            if (projectType === 'External') {
+                externalFields.style.display = 'block';
+            } else {
+                externalFields.style.display = 'none';
+            }
+        });
     </script>
 </body>
 
