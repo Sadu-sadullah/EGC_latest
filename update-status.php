@@ -56,6 +56,16 @@ try {
 
 include 'permissions.php';
 
+// Function to calculate actual duration in hours (similar to getWeekdayHours but simpler for this case)
+function calculateActualDuration($start, $end) {
+    if (!$start || !$end || $start >= $end) {
+        return 0;
+    }
+    $startTime = strtotime($start);
+    $endTime = strtotime($end);
+    return ($endTime - $startTime) / 3600; // Convert seconds to hours
+}
+
 try {
     // Validate user input
     $user_id = $_SESSION['user_id'] ?? null;
@@ -63,7 +73,8 @@ try {
     $new_status = $_POST['status'] ?? null;
     $completion_description = $_POST['completion_description'] ?? null;
     $delayed_reason = $_POST['delayed_reason'] ?? null;
-    $verified_status = $_POST['verified_status'] ?? null; // New input from close task modal
+    $verified_status = $_POST['verified_status'] ?? null;
+    $actual_finish_date = $_POST['actual_finish_date'] ?? $currentTime; // Use provided finish date or current time
 
     if (!$task_id || !$new_status) {
         ob_end_clean();
@@ -101,8 +112,7 @@ try {
 
     // Permission validation
     if (!function_exists('hasPermission')) {
-        function hasPermission($perm)
-        {
+        function hasPermission($perm) {
             return false; // Default to no permission if the function is missing
         }
     }
@@ -146,7 +156,7 @@ try {
         exit;
     }
 
-    // Check if the task has a predecessor and ensure it is completed before starting the task
+    // Check predecessor task completion if moving to "In Progress"
     if ($predecessor_task_id && $new_status === 'In Progress' && $new_status !== $current_status) {
         $predecessorStmt = $pdo->prepare("SELECT status, actual_finish_date FROM tasks WHERE task_id = ?");
         $predecessorStmt->execute([$predecessor_task_id]);
@@ -160,7 +170,23 @@ try {
 
         $actualStartDate = date('Y-m-d H:i:s', strtotime($predecessorTask['actual_finish_date'] . ' +1 day'));
     } else {
-        $actualStartDate = $currentTime;
+        $actualStartDate = $actual_start_date ?? $currentTime; // Use existing start date or current time
+    }
+
+    // Check actual duration for completion statuses
+    if (in_array($new_status, ['Completed on Time', 'Delayed Completion']) && $new_status !== $current_status) {
+        if (!$actual_start_date) {
+            ob_end_clean();
+            echo json_encode(['success' => false, 'message' => 'Task must have an actual start date before completion.']);
+            exit;
+        }
+
+        $actualDurationHours = calculateActualDuration($actual_start_date, $actual_finish_date);
+        if ($actualDurationHours < 1) {
+            ob_end_clean();
+            echo json_encode(['success' => false, 'message' => 'Error: Actual duration must be at least 1 hour for completion. Current duration is less than 1 hour.']);
+            exit;
+        }
     }
 
     // Perform task update based on new status
@@ -173,17 +199,16 @@ try {
     } elseif ($new_status === 'Completed on Time' || $new_status === 'Delayed Completion') {
         $sql = "UPDATE tasks SET status = ?, completion_description = ?, actual_finish_date = ? WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$new_status, $completion_description, $currentTime, $task_id]);
+        $stmt->execute([$new_status, $completion_description, $actual_finish_date, $task_id]);
 
         if ($new_status === 'Delayed Completion') {
-            $sql = "INSERT INTO task_transactions (task_id, delayed_reason, actual_finish_date) VALUES (?, ?, NOW())";
+            $sql = "INSERT INTO task_transactions (task_id, delayed_reason, actual_finish_date) VALUES (?, ?, ?)";
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([$task_id, $delayed_reason]);
+            $stmt->execute([$task_id, $delayed_reason, $actual_finish_date]);
         }
     } elseif ($new_status === 'Closed') {
         // Handle closure with verification
         if ($verified_status === 'Completed on Time' && $current_status === 'Delayed Completion') {
-            // Update status to Closed and remove delayed reason
             $sql = "UPDATE tasks SET status = ? WHERE task_id = ?";
             $stmt = $pdo->prepare($sql);
             $stmt->execute([$new_status, $task_id]);
@@ -191,21 +216,13 @@ try {
             $deleteStmt = $pdo->prepare("DELETE FROM task_transactions WHERE task_id = ?");
             $deleteStmt->execute([$task_id]);
         } elseif ($verified_status === 'Delayed Completion' || $current_status === 'Delayed Completion') {
-            // Keep delayed reason and update status to Closed
             $sql = "UPDATE tasks SET status = ? WHERE task_id = ?";
             $stmt = $pdo->prepare($sql);
             $stmt->execute([$new_status, $task_id]);
         } else {
-            // Just close the task (no delayed reason to remove)
             $sql = "UPDATE tasks SET status = ? WHERE task_id = ?";
             $stmt = $pdo->prepare($sql);
             $stmt->execute([$new_status, $task_id]);
-        }
-
-        if ($current_status === 'Delayed Completion') {
-            $delayStmt = $pdo->prepare("SELECT delayed_reason FROM task_transactions WHERE task_id = ? ORDER BY actual_finish_date DESC LIMIT 1");
-            $delayStmt->execute([$task_id]);
-            $delayed_reason = $delayStmt->fetchColumn();
         }
     } else {
         $sql = "UPDATE tasks SET status = ? WHERE task_id = ?";
