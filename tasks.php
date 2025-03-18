@@ -514,7 +514,7 @@ $earliestDateTime = new DateTime($earliestDate);
 
 // Calculate the maximum date (1 year from the earliest date)
 $maxDateTime = clone $earliestDateTime;
-$maxDateTime->modify('+1 year');
+$maxDateTime->modify('+3 months');
 
 // Format the dates for the HTML input (type="date" expects YYYY-MM-DD)
 $minDate = $earliestDateTime->format('Y-m-d');
