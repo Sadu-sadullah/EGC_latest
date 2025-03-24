@@ -7,10 +7,17 @@ require 'permissions.php';
 
 session_start();
 
-// Check if the user is logged in
-if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
+// Check if the user is logged in and has export permission
+if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true || !hasPermission('export_tasks')) {
     header("Location: portal-login.html");
     exit;
+}
+
+// Set timezone based on user preference or fallback to UTC
+if (isset($_COOKIE['user_timezone'])) {
+    date_default_timezone_set($_COOKIE['user_timezone']);
+} else {
+    date_default_timezone_set('UTC');
 }
 
 // Database connection
@@ -30,6 +37,8 @@ if ($conn->connect_error) {
 $user_id = $_SESSION['user_id'];
 $user_role = $_SESSION['role'];
 
+$conn->query("SET sql_mode=(SELECT REPLACE(@@sql_mode, 'ONLY_FULL_GROUP_BY', ''))");
+
 if (hasPermission('view_all_tasks')) {
     $taskQuery = "
         SELECT 
@@ -42,16 +51,16 @@ if (hasPermission('view_all_tasks')) {
             tasks.actual_start_date,
             tasks.actual_finish_date AS task_actual_finish_date,
             tasks.status,
-            tasks.project_type,
+            projects.project_type,
             tasks.recorded_timestamp,
             tasks.assigned_by_id,
             tasks.user_id,
             tasks.predecessor_task_id,
-            tasks.customer_name,
-            tasks.customer_email,
-            tasks.customer_mobile,
-            tasks.cost,
-            tasks.project_manager,
+            projects.customer_name,
+            projects.customer_email,
+            projects.customer_mobile,
+            projects.cost,
+            projects.project_manager,
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
@@ -68,8 +77,7 @@ if (hasPermission('view_all_tasks')) {
         JOIN users AS assigned_by_user ON tasks.assigned_by_id = assigned_by_user.id 
         JOIN user_departments AS assigned_by_ud ON assigned_by_user.id = assigned_by_ud.user_id
         JOIN departments AS assigned_by_department ON assigned_by_ud.department_id = assigned_by_department.id
-        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id 
-            AND tasks.project_type = predecessor_task.project_type
+        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id
         JOIN projects ON tasks.project_id = projects.id
         GROUP BY tasks.task_id
         ORDER BY 
@@ -92,16 +100,16 @@ if (hasPermission('view_all_tasks')) {
             tasks.actual_start_date,
             tasks.actual_finish_date AS task_actual_finish_date,
             tasks.status,
-            tasks.project_type,
+            projects.project_type,
             tasks.recorded_timestamp,
             tasks.assigned_by_id,
             tasks.user_id,
             tasks.predecessor_task_id,
-            tasks.customer_name,
-            tasks.customer_email,
-            tasks.customer_mobile,
-            tasks.cost,
-            tasks.project_manager,
+            projects.customer_name,
+            projects.customer_email,
+            projects.customer_mobile,
+            projects.cost,
+            projects.project_manager,
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
@@ -118,8 +126,7 @@ if (hasPermission('view_all_tasks')) {
         JOIN users AS assigned_by_user ON tasks.assigned_by_id = assigned_by_user.id 
         JOIN user_departments AS assigned_by_ud ON assigned_by_user.id = assigned_by_ud.user_id
         JOIN departments AS assigned_by_department ON assigned_by_ud.department_id = assigned_by_department.id
-        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id 
-            AND tasks.project_type = predecessor_task.project_type
+        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id
         JOIN projects ON tasks.project_id = projects.id
         WHERE assigned_to_ud.department_id IN (SELECT department_id FROM user_departments WHERE user_id = ?)
         GROUP BY tasks.task_id
@@ -143,16 +150,16 @@ if (hasPermission('view_all_tasks')) {
             tasks.actual_start_date,
             tasks.actual_finish_date AS task_actual_finish_date,
             tasks.status,
-            tasks.project_type,
+            projects.project_type,
             tasks.recorded_timestamp,
             tasks.assigned_by_id,
             tasks.user_id,
             tasks.predecessor_task_id,
-            tasks.customer_name,
-            tasks.customer_email,
-            tasks.customer_mobile,
-            tasks.cost,
-            tasks.project_manager,
+            projects.customer_name,
+            projects.customer_email,
+            projects.customer_mobile,
+            projects.cost,
+            projects.project_manager,
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
@@ -188,7 +195,8 @@ $result = $stmt->get_result();
 $allTasks = $result->fetch_all(MYSQLI_ASSOC);
 
 // Function to calculate weekday hours (from tasks.php)
-function getWeekdayHours($start, $end) {
+function getWeekdayHours($start, $end)
+{
     if ($start >= $end) {
         return 0; // Invalid range
     }
@@ -240,6 +248,15 @@ foreach ($allTasks as &$task) {
     }
 }
 
+// Check if there are any external tasks to determine if customer fields should be included
+$hasExternalTasks = false;
+foreach ($allTasks as $task) {
+    if ($task['project_type'] === 'External') {
+        $hasExternalTasks = true;
+        break;
+    }
+}
+
 // Set headers for CSV download
 header('Content-Type: text/csv');
 header('Content-Disposition: attachment; filename="tasks_export_' . date('Y-m-d_H-i-s') . '.csv"');
@@ -263,19 +280,29 @@ $headers = [
     'Assigned By',
     'Assigned By Department',
     'Created On',
-    'Predecessor Task',
-    'Customer Name',
-    'Customer Email',
-    'Customer Mobile',
-    'Cost',
-    'Project Manager',
+    'Predecessor Task'
+];
+
+// Conditionally add external project fields
+if ($hasExternalTasks) {
+    $headers = array_merge($headers, [
+        'Customer Name',
+        'Customer Email',
+        'Customer Mobile',
+        'Cost',
+        'Project Manager'
+    ]);
+}
+
+// Add remaining fields
+$headers = array_merge($headers, [
     'Completion Description',
     'Delayed Reason',
     'Transaction Actual Finish Date'
-];
+]);
 
 // Add "Assigned To" and "Assigned To Department" only if permission exists
-if (hasPermission('view_all_tasks') || hasPermission('view_department_tasks')) {
+if (hasPermission('assign_tasks')) {
     array_splice($headers, 11, 0, ['Assigned To', 'Assigned To Department']);
 }
 
@@ -301,18 +328,26 @@ foreach ($allTasks as $row) {
             $row['assigned_by'],
             $row['assigned_by_department'],
             date("d M Y, h:i A", strtotime($row['recorded_timestamp'])),
-            $row['predecessor_task_name'] ?? '',
-            $row['customer_name'] ?? '',
-            $row['customer_email'] ?? '',
-            $row['customer_mobile'] ?? '',
-            $row['cost'] !== null ? number_format($row['cost'], 2) : '',
-            $row['project_manager'] ?? '',
+            $row['predecessor_task_name'] ?? ''
+        ];
+
+        if ($hasExternalTasks) {
+            $rowData = array_merge($rowData, [
+                $row['customer_name'] ?? '',
+                $row['customer_email'] ?? '',
+                $row['customer_mobile'] ?? '',
+                $row['cost'] !== null ? number_format($row['cost'], 2) : '',
+                $row['project_manager'] ?? ''
+            ]);
+        }
+
+        $rowData = array_merge($rowData, [
             $row['completion_description'] ?? '',
             $row['delayed_reason'] ?? '',
             $row['transaction_actual_finish_date'] ? date("d M Y, h:i A", strtotime($row['transaction_actual_finish_date'])) : ''
-        ];
+        ]);
 
-        if (hasPermission('view_all_tasks') || hasPermission('view_department_tasks')) {
+        if (hasPermission('assign_tasks')) {
             array_splice($rowData, 11, 0, [
                 $row['assigned_to'] ?? '',
                 $row['assigned_to_department'] ?? ''
@@ -348,18 +383,26 @@ foreach ($allTasks as $row) {
             $row['assigned_by'],
             $row['assigned_by_department'],
             date("d M Y, h:i A", strtotime($row['recorded_timestamp'])),
-            $row['predecessor_task_name'] ?? '',
-            $row['customer_name'] ?? '',
-            $row['customer_email'] ?? '',
-            $row['customer_mobile'] ?? '',
-            $row['cost'] !== null ? number_format($row['cost'], 2) : '',
-            $row['project_manager'] ?? '',
+            $row['predecessor_task_name'] ?? ''
+        ];
+
+        if ($hasExternalTasks) {
+            $rowData = array_merge($rowData, [
+                $row['customer_name'] ?? '',
+                $row['customer_email'] ?? '',
+                $row['customer_mobile'] ?? '',
+                $row['cost'] !== null ? number_format($row['cost'], 2) : '',
+                $row['project_manager'] ?? ''
+            ]);
+        }
+
+        $rowData = array_merge($rowData, [
             $row['completion_description'] ?? '',
             $row['delayed_reason'] ?? '',
             $row['transaction_actual_finish_date'] ? date("d M Y, h:i A", strtotime($row['transaction_actual_finish_date'])) : ''
-        ];
+        ]);
 
-        if (hasPermission('view_all_tasks') || hasPermission('view_department_tasks')) {
+        if (hasPermission('assign_tasks')) {
             array_splice($rowData, 11, 0, [
                 $row['assigned_to'] ?? '',
                 $row['assigned_to_department'] ?? ''
