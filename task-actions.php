@@ -562,7 +562,8 @@ $completedTasks = array_filter($allTasks, function ($task) {
                         <tbody>
                             <?php $taskCountStart = 1;
                             foreach ($pendingStartedTasks as $row): ?>
-                                <tr class="align-middle" data-task-id="<?= htmlspecialchars($row['task_id']) ?>">
+                                <tr class="align-middle" data-task-id="<?= htmlspecialchars($row['task_id']) ?>"
+                                    data-status="<?= htmlspecialchars($row['status']) ?>">
                                     <td><?= $taskCountStart++ ?></td>
                                     <td><?= htmlspecialchars($row['project_name']) ?></td>
                                     <td><?= htmlspecialchars($row['task_name']) ?></td>
@@ -637,7 +638,8 @@ $completedTasks = array_filter($allTasks, function ($task) {
                         <tbody>
                             <?php $taskCountStart = 1;
                             foreach ($completedTasks as $row): ?>
-                                <tr class="align-middle" data-task-id="<?= htmlspecialchars($row['task_id']) ?>">
+                                <tr class="align-middle" data-task-id="<?= htmlspecialchars($row['task_id']) ?>"
+                                    data-status="<?= htmlspecialchars($row['status']) ?>">
                                     <td><?= $taskCountStart++ ?></td>
                                     <td><?= htmlspecialchars($row['project_name']) ?></td>
                                     <td><?= htmlspecialchars($row['task_name']) ?></td>
@@ -711,12 +713,12 @@ $completedTasks = array_filter($allTasks, function ($task) {
             function filterAndPaginateTable(tableId, selectedProjects, selectedDepartments, startDate, endDate, currentPage) {
                 const rows = $(`${tableId} tbody tr`);
                 let visibleRows = [];
-                const selectedStatuses = tableId === '#pending-tasks' ? $('#status-filter').val() || [] : [];
+                const selectedStatuses = tableId === '#pending-tasks' ? ($('#status-filter').val() || []) : [];
 
                 rows.each(function () {
                     const projectName = $(this).find('td:nth-child(2)').text().trim();
                     const departmentName = $(this).find('td:nth-child(4)').text().trim().match(/\(([^)]+)\)/)?.[1] || '';
-                    const taskStatus = $(this).data('status'); // Assuming status is stored in data attribute or fetched separately
+                    const taskStatus = $(this).attr('data-status') || ''; // Read from data-status attribute
 
                     let dateInRange = true; // Simplified for this page; adjust if date columns are added back
                     if (startDate && endDate) {
@@ -753,7 +755,6 @@ $completedTasks = array_filter($allTasks, function ($task) {
 
                 return visibleRows.length;
             }
-
             function resetTaskNumbering(tableId) {
                 const rows = $(`${tableId} tbody tr`);
                 rows.each(function (index) {
@@ -812,7 +813,8 @@ $completedTasks = array_filter($allTasks, function ($task) {
             $('.btn-primary[onclick="resetFilters()"]').on('click', resetFilters);
             applyFilters();
 
-            $(document).on('click', '.view-timeline-btn', function () {
+            $(document).on('click', '.view-timeline-btn', function (e) {
+                e.preventDefault(); // Prevent the default anchor behavior (scrolling to top)
                 const taskId = $(this).data('task-id');
                 $.ajax({
                     url: 'fetch-task-timeline.php',
