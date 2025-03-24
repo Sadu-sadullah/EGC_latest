@@ -176,7 +176,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
     $project_id = (int) $_POST['project_id'];
     $task_name = trim($_POST['task_name']);
     $task_description = trim($_POST['task_description']);
-    $project_type = trim($_POST['project_type']);
     $planned_start_date = trim($_POST['planned_start_date']);
     $planned_finish_date = trim($_POST['planned_finish_date']);
     $status = 'assigned';
@@ -185,20 +184,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
     $assigned_by_id = $_SESSION['user_id'];
     $predecessor_task_id = !empty($_POST['predecessor_task_id']) ? (int) $_POST['predecessor_task_id'] : null;
 
-    // New external project fields (optional)
-    $customer_name = $project_type === 'External' ? trim($_POST['customer_name'] ?? '') : null;
-    $customer_email = $project_type === 'External' ? trim($_POST['customer_email'] ?? '') : null;
-    $customer_mobile = $project_type === 'External' ? trim($_POST['customer_mobile'] ?? '') : null;
-    $cost = $project_type === 'External' && !empty($_POST['cost']) ? (float) $_POST['cost'] : null;
-    $project_manager = $project_type === 'External' ? trim($_POST['project_manager'] ?? '') : null;
-
     $currentDate = new DateTime();
     $datePlannedStartDate = new DateTime($planned_start_date);
     $datePlannedEndDate = new DateTime($planned_finish_date);
     $threeMonthsAgo = (clone $currentDate)->modify('-3 months');
     $threeMonthsAhead = (clone $currentDate)->modify('+3 months');
 
-    if (empty($task_name) || empty($task_description) || empty($project_type) || empty($planned_start_date) || empty($planned_finish_date) || !$assigned_user_id || !$project_id) {
+    if (empty($task_name) || empty($task_description) || empty($planned_start_date) || empty($planned_finish_date) || !$assigned_user_id || !$project_id) {
         echo '<script>alert("Please fill in all required fields.");</script>';
     } elseif ($datePlannedStartDate < $threeMonthsAgo || $datePlannedEndDate > $threeMonthsAhead) {
         echo '<script>alert("Error: Planned start date is too far in the past or too far in the future.");</script>';
@@ -208,35 +200,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
             'project_id',
             'task_name',
             'task_description',
-            'project_type',
             'planned_start_date',
             'planned_finish_date',
             'status',
             'recorded_timestamp',
             'assigned_by_id'
         ];
-        $params = [$assigned_user_id, $project_id, $task_name, $task_description, $project_type, $planned_start_date, $planned_finish_date, $status, $recorded_timestamp, $assigned_by_id];
+        $params = [$assigned_user_id, $project_id, $task_name, $task_description, $planned_start_date, $planned_finish_date, $status, $recorded_timestamp, $assigned_by_id];
         $types = str_repeat('s', count($params));
 
         if ($predecessor_task_id !== null) {
             $placeholders[] = 'predecessor_task_id';
             $params[] = $predecessor_task_id;
             $types .= 'i';
-        }
-
-        // Add external project fields if applicable
-        if ($project_type === 'External') {
-            $placeholders[] = 'customer_name';
-            $placeholders[] = 'customer_email';
-            $placeholders[] = 'customer_mobile';
-            $placeholders[] = 'cost';
-            $placeholders[] = 'project_manager';
-            $params[] = $customer_name;
-            $params[] = $customer_email;
-            $params[] = $customer_mobile;
-            $params[] = $cost;
-            $params[] = $project_manager;
-            $types .= 'sssds'; // string, string, string, double, string
         }
 
         $sql = "INSERT INTO tasks (" . implode(", ", $placeholders) . ") VALUES (" . str_repeat('?,', count($placeholders) - 1) . "?)";
@@ -253,13 +229,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['task_name'])) {
                 $user = $userResult->fetch_assoc();
                 $email = $user['email'];
                 $username = $user['username'];
-                $projectQuery = $conn->prepare("SELECT project_name FROM projects WHERE id = ?");
+                $projectQuery = $conn->prepare("SELECT project_name, project_type FROM projects WHERE id = ?");
                 $projectQuery->bind_param("i", $project_id);
                 $projectQuery->execute();
                 $projectResult = $projectQuery->get_result();
                 if ($projectResult->num_rows > 0) {
                     $project = $projectResult->fetch_assoc();
                     $project_name = $project['project_name'];
+                    $project_type = $project['project_type'];
                     sendTaskNotification($email, $username, $project_name, $project_type, $task_name, $task_description, $planned_start_date, $planned_finish_date, $assigned_by_id, $conn);
                 }
             }
@@ -290,16 +267,16 @@ if (hasPermission('view_all_tasks')) {
             tasks.actual_start_date,
             tasks.actual_finish_date AS task_actual_finish_date,
             tasks.status,
-            tasks.project_type,
+            projects.project_type,
             tasks.recorded_timestamp,
             tasks.assigned_by_id,
             tasks.user_id,
             tasks.predecessor_task_id,
-            tasks.customer_name,
-            tasks.customer_email,
-            tasks.customer_mobile,
-            tasks.cost,
-            tasks.project_manager,
+            projects.customer_name,
+            projects.customer_email,
+            projects.customer_mobile,
+            projects.cost,
+            projects.project_manager,
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
@@ -316,8 +293,7 @@ if (hasPermission('view_all_tasks')) {
         JOIN users AS assigned_by_user ON tasks.assigned_by_id = assigned_by_user.id 
         JOIN user_departments AS assigned_by_ud ON assigned_by_user.id = assigned_by_ud.user_id
         JOIN departments AS assigned_by_department ON assigned_by_ud.department_id = assigned_by_department.id
-        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id 
-            AND tasks.project_type = predecessor_task.project_type
+        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id
         JOIN projects ON tasks.project_id = projects.id
         GROUP BY tasks.task_id
         ORDER BY 
@@ -340,16 +316,16 @@ if (hasPermission('view_all_tasks')) {
             tasks.actual_start_date,
             tasks.actual_finish_date AS task_actual_finish_date,
             tasks.status,
-            tasks.project_type,
+            projects.project_type,
             tasks.recorded_timestamp,
             tasks.assigned_by_id,
             tasks.user_id,
             tasks.predecessor_task_id,
-            tasks.customer_name,
-            tasks.customer_email,
-            tasks.customer_mobile,
-            tasks.cost,
-            tasks.project_manager,
+            projects.customer_name,
+            projects.customer_email,
+            projects.customer_mobile,
+            projects.cost,
+            projects.project_manager,
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
@@ -366,8 +342,7 @@ if (hasPermission('view_all_tasks')) {
         JOIN users AS assigned_by_user ON tasks.assigned_by_id = assigned_by_user.id 
         JOIN user_departments AS assigned_by_ud ON assigned_by_user.id = assigned_by_ud.user_id
         JOIN departments AS assigned_by_department ON assigned_by_ud.department_id = assigned_by_department.id
-        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id 
-            AND tasks.project_type = predecessor_task.project_type
+        LEFT JOIN tasks AS predecessor_task ON tasks.predecessor_task_id = predecessor_task.task_id
         JOIN projects ON tasks.project_id = projects.id
         WHERE assigned_to_ud.department_id IN (SELECT department_id FROM user_departments WHERE user_id = ?)
         GROUP BY tasks.task_id
@@ -391,16 +366,16 @@ if (hasPermission('view_all_tasks')) {
             tasks.actual_start_date,
             tasks.actual_finish_date AS task_actual_finish_date,
             tasks.status,
-            tasks.project_type,
+            projects.project_type,
             tasks.recorded_timestamp,
             tasks.assigned_by_id,
             tasks.user_id,
             tasks.predecessor_task_id,
-            tasks.customer_name,
-            tasks.customer_email,
-            tasks.customer_mobile,
-            tasks.cost,
-            tasks.project_manager,
+            projects.customer_name,
+            projects.customer_email,
+            projects.customer_mobile,
+            projects.cost,
+            projects.project_manager,
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
@@ -961,12 +936,11 @@ function getWeekdayHours($start, $end)
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <form method="post" action="">
-                        <input type="hidden" id="user-role" value="<?= htmlspecialchars($user_role) ?>">
+                    <form id="createTaskForm" method="POST" action="tasks.php">
                         <div class="form-group">
-                            <label for="project_name">Project Name:</label>
-                            <select id="project_name_dropdown" class="form-control mb-2" name="project_id" required>
-                                <option value="">Select an existing project</option>
+                            <label for="project_id">Select Project:</label>
+                            <select id="project_id" name="project_id" class="form-control" required>
+                                <option value="">Select a project</option>
                                 <?php foreach ($projects as $project): ?>
                                     <option value="<?= htmlspecialchars($project['id']) ?>">
                                         <?= htmlspecialchars($project['project_name']) ?>
@@ -975,73 +949,44 @@ function getWeekdayHours($start, $end)
                             </select>
                         </div>
                         <div class="form-group">
-                            <label for="predecessor_task_id">Predecessor Task (Optional):</label>
-                            <select id="predecessor_task_id" name="predecessor_task_id" class="form-control">
-                                <option value="">Select a predecessor task</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
                             <label for="task_name">Task Name:</label>
                             <input type="text" id="task_name" name="task_name" class="form-control" required>
                         </div>
                         <div class="form-group">
                             <label for="task_description">Task Description:</label>
-                            <textarea id="task_description" name="task_description" rows="4" class="form-control"
+                            <textarea id="task_description" name="task_description" class="form-control" rows="3"
                                 required></textarea>
                         </div>
                         <div class="form-group">
-                            <label for="project_type">Project Type:</label>
-                            <select id="project_type" name="project_type" class="form-control" required>
-                                <option value="Internal">Internal</option>
-                                <option value="External">External</option>
-                            </select>
-                        </div>
-                        <!-- External Project Fields (hidden by default) -->
-                        <div id="external-fields" style="display: none;">
-                            <div class="form-group">
-                                <label for="customer_name">Customer Name:</label>
-                                <input type="text" id="customer_name" name="customer_name" class="form-control">
-                            </div>
-                            <div class="form-group">
-                                <label for="customer_email">Customer Email:</label>
-                                <input type="email" id="customer_email" name="customer_email" class="form-control">
-                            </div>
-                            <div class="form-group">
-                                <label for="customer_mobile">Customer Mobile:</label>
-                                <input type="text" id="customer_mobile" name="customer_mobile" class="form-control">
-                            </div>
-                            <div class="form-group">
-                                <label for="cost">Cost:</label>
-                                <input type="number" id="cost" name="cost" class="form-control" step="0.01" min="0">
-                            </div>
-                            <div class="form-group">
-                                <label for="project_manager">Project Manager:</label>
-                                <input type="text" id="project_manager" name="project_manager" class="form-control">
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="planned_start_date">Expected Start Date & Time</label>
+                            <label for="planned_start_date">Planned Start Date:</label>
                             <input type="datetime-local" id="planned_start_date" name="planned_start_date"
                                 class="form-control" required>
                         </div>
                         <div class="form-group">
-                            <label for="planned_finish_date">Expected End Date & Time</label>
+                            <label for="planned_finish_date">Planned Finish Date:</label>
                             <input type="datetime-local" id="planned_finish_date" name="planned_finish_date"
                                 class="form-control" required>
                         </div>
                         <div class="form-group">
-                            <label for="assigned_user_id">Assign to:</label>
+                            <label for="assigned_user_id">Assign To:</label>
                             <select id="assigned_user_id" name="assigned_user_id" class="form-control" required>
                                 <option value="">Select a user</option>
                                 <?php foreach ($users as $user): ?>
-                                    <option value="<?= $user['id'] ?>"><?= htmlspecialchars($user['username']) ?>
-                                        (<?= htmlspecialchars($user['departments']) ?> -
-                                        <?= htmlspecialchars($user['role']) ?>)
+                                    <option value="<?= htmlspecialchars($user['id']) ?>">
+                                        <?= htmlspecialchars($user['username']) ?>
+                                        (<?= htmlspecialchars($user['departments']) ?>)
                                     </option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        <button type="submit" class="btn btn-primary">Add Task</button>
+                        <div class="form-group">
+                            <label for="predecessor_task_id">Predecessor Task:</label>
+                            <select id="predecessor_task_id" name="predecessor_task_id" class="form-control">
+                                <option value="">Select a predecessor task</option>
+                                <!-- Populated dynamically via JavaScript -->
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Create Task</button>
                     </form>
                 </div>
                 <div class="modal-footer">
@@ -1053,7 +998,7 @@ function getWeekdayHours($start, $end)
 
     <div class="modal fade" id="createProjectModal" tabindex="-1" aria-labelledby="createProjectModalLabel"
         aria-hidden="true">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="createProjectModalLabel">Manage Projects</h5>
@@ -1077,6 +1022,36 @@ function getWeekdayHours($start, $end)
                             <input type="text" id="new_project_name" name="new_project_name" class="form-control"
                                 required>
                         </div>
+                        <div class="form-group">
+                            <label for="project_type">Project Type:</label>
+                            <select id="project_type" name="project_type" class="form-control" required>
+                                <option value="Internal">Internal</option>
+                                <option value="External">External</option>
+                            </select>
+                        </div>
+                        <!-- External Project Fields -->
+                        <div id="external-project-fields" style="display: none;">
+                            <div class="form-group">
+                                <label for="customer_name">Customer Name:</label>
+                                <input type="text" id="customer_name" name="customer_name" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="customer_email">Customer Email:</label>
+                                <input type="email" id="customer_email" name="customer_email" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="customer_mobile">Customer Mobile:</label>
+                                <input type="text" id="customer_mobile" name="customer_mobile" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="cost">Cost:</label>
+                                <input type="number" id="cost" name="cost" class="form-control" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="project_manager">Project Manager:</label>
+                                <input type="text" id="project_manager" name="project_manager" class="form-control">
+                            </div>
+                        </div>
                         <input type="hidden" name="project_id" id="project_id" value="">
                         <input type="hidden" name="action" id="project_action" value="create">
                         <input type="hidden" name="created_by_user_id" value="<?= $user_id ?>">
@@ -1085,6 +1060,9 @@ function getWeekdayHours($start, $end)
                             Project</button>
                         <button type="button" class="btn btn-danger" onclick="deleteProject()">Delete Project</button>
                     </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
         </div>
@@ -1419,9 +1397,8 @@ function getWeekdayHours($start, $end)
                                 $isClosedFromDelayedCompletion = $row['status'] === 'Closed' && $row['delayed_reason'];
                                 ?>
                                 <tr data-project="<?= htmlspecialchars($row['project_name']) ?>"
-                                    data-status="<?= htmlspecialchars($row['status']) ?>"
-                                    class="align-middle <?php if ($row['status'] === 'Delayed Completion' || $isClosedFromDelayedCompletion)
-                                        echo 'delayed-task'; ?>">
+                                    data-status="<?= htmlspecialchars($row['status']) ?>" class="align-middle <?php if ($row['status'] === 'Delayed Completion' || $isClosedFromDelayedCompletion)
+                                          echo 'delayed-task'; ?>">
                                     <td><?= $taskCountStart++ ?></td>
                                     <td><?= htmlspecialchars($row['project_name']) ?></td>
                                     <td>
@@ -1739,13 +1716,17 @@ function getWeekdayHours($start, $end)
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
     <script>
+        // Task Status Management
         const viewDescriptionModal = document.getElementById('viewDescriptionModal');
         viewDescriptionModal.addEventListener('show.bs.modal', function (event) {
             const button = event.relatedTarget;
             const description = button.getAttribute('data-description');
-            const descriptionText = document.getElementById('completion-description-text');
-            descriptionText.textContent = description || "No description provided.";
+            document.getElementById('completion-description-text').textContent = description || "No description provided.";
         });
 
         function handleStatusChange(event, taskId) {
@@ -1758,109 +1739,111 @@ function getWeekdayHours($start, $end)
 
             if (status === 'Reassigned') {
                 document.getElementById('reassign-task-id').value = taskId;
-                const reassignmentModal = new bootstrap.Modal(document.getElementById('reassignmentModal'));
-                reassignmentModal.show();
+                new bootstrap.Modal(document.getElementById('reassignmentModal')).show();
             } else if (status === 'Delayed Completion' || status === 'Completed on Time') {
                 document.getElementById('task-id').value = taskId;
                 document.getElementById('modal-status').value = status;
                 document.getElementById('predecessor-task-id').value = predecessorTaskId;
                 if (predecessorTaskId && (!predecessorTaskName || predecessorTaskName === 'N/A')) {
-                    fetch(`fetch-predecessor-task-name.php?task_id=${predecessorTaskId}`).then(response => response.json()).then(data => {
-                        predecessorTaskName = data.task_name || 'N/A';
-                        document.getElementById('predecessor-task-name').innerText = predecessorTaskName;
-                        showPredecessorSection(predecessorTaskId, predecessorTaskName);
-                    }).catch(error => {
-                        console.error('Error fetching predecessor task name:', error);
-                        document.getElementById('predecessor-task-name').innerText = 'N/A';
-                        showPredecessorSection(predecessorTaskId, 'N/A');
-                    });
+                    fetch(`fetch-predecessor-task-name.php?task_id=${predecessorTaskId}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            predecessorTaskName = data.task_name || 'N/A';
+                            document.getElementById('predecessor-task-name').innerText = predecessorTaskName;
+                            showPredecessorSection(predecessorTaskId, predecessorTaskName);
+                        })
+                        .catch(error => {
+                            console.error('Error fetching predecessor task name:', error);
+                            document.getElementById('predecessor-task-name').innerText = 'N/A';
+                            showPredecessorSection(predecessorTaskId, 'N/A');
+                        });
                 } else {
                     document.getElementById('predecessor-task-name').innerText = predecessorTaskName;
                     showPredecessorSection(predecessorTaskId, predecessorTaskName);
                 }
                 const delayedReasonContainer = document.getElementById('delayed-reason-container');
                 if (delayedReasonContainer) delayedReasonContainer.style.display = (status === 'Delayed Completion') ? 'block' : 'none';
-                const completionModal = new bootstrap.Modal(document.getElementById('completionModal'));
-                completionModal.show();
+                new bootstrap.Modal(document.getElementById('completionModal')).show();
             } else if (status === 'Closed') {
                 fetchTaskDetailsForClosure(taskId);
             } else {
-                fetch('update-status.php', { method: 'POST', body: new FormData(form) }).then(response => response.json()).then(data => {
-                    if (data.success) {
-                        document.getElementById('success-task-name').innerText = data.task_name;
-                        document.getElementById('success-message').innerText = data.message;
-                        const successModal = new bootstrap.Modal(document.getElementById('successModal'));
-                        successModal.show();
-                        setTimeout(() => window.location.reload(), 2000);
-                    } else {
-                        alert(data.message);
-                    }
-                }).catch(error => {
-                    console.error('Error:', error);
-                    alert('An error occurred while updating the status.');
-                });
+                fetch('update-status.php', { method: 'POST', body: new FormData(form) })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            document.getElementById('success-task-name').innerText = data.task_name;
+                            document.getElementById('success-message').innerText = data.message;
+                            new bootstrap.Modal(document.getElementById('successModal')).show();
+                            setTimeout(() => window.location.reload(), 2000);
+                        } else {
+                            alert(data.message);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('An error occurred while updating the status.');
+                    });
             }
         }
 
         function fetchTaskDetailsForClosure(taskId) {
-            fetch(`fetch-task-details.php?task_id=${taskId}`).then(response => response.json()).then(data => {
-                if (data.success) {
-                    document.getElementById('close-task-id').value = taskId;
-                    document.getElementById('close-task-name').innerText = data.task_name;
-                    document.getElementById('close-planned-start').innerText = data.planned_start_date;
-                    document.getElementById('close-planned-end').innerText = data.planned_finish_date;
-                    document.getElementById('close-actual-start').innerText = data.actual_start_date || 'N/A';
-                    document.getElementById('close-actual-end').innerText = data.actual_finish_date || 'N/A';
-                    document.getElementById('close-planned-duration').innerText = data.planned_duration;
-                    document.getElementById('close-actual-duration').innerText = data.actual_duration || 'N/A';
-                    const delayedReasonContainer = document.getElementById('close-delayed-reason-container');
-                    const delayedReason = document.getElementById('close-delayed-reason');
-                    if (data.delayed_reason) {
-                        delayedReason.innerText = data.delayed_reason;
-                        delayedReasonContainer.style.display = 'block';
+            fetch(`fetch-task-details.php?task_id=${taskId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('close-task-id').value = taskId;
+                        document.getElementById('close-task-name').innerText = data.task_name;
+                        document.getElementById('close-planned-start').innerText = data.planned_start_date;
+                        document.getElementById('close-planned-end').innerText = data.planned_finish_date;
+                        document.getElementById('close-actual-start').innerText = data.actual_start_date || 'N/A';
+                        document.getElementById('close-actual-end').innerText = data.actual_finish_date || 'N/A';
+                        document.getElementById('close-planned-duration').innerText = data.planned_duration;
+                        document.getElementById('close-actual-duration').innerText = data.actual_duration || 'N/A';
+                        const delayedReasonContainer = document.getElementById('close-delayed-reason-container');
+                        const delayedReason = document.getElementById('close-delayed-reason');
+                        if (data.delayed_reason) {
+                            delayedReason.innerText = data.delayed_reason;
+                            delayedReasonContainer.style.display = 'block';
+                        } else {
+                            delayedReasonContainer.style.display = 'none';
+                        }
+                        document.getElementById('close-verification').value = data.current_status;
+                        new bootstrap.Modal(document.getElementById('closeTaskModal')).show();
                     } else {
-                        delayedReasonContainer.style.display = 'none';
+                        alert(data.message);
                     }
-                    document.getElementById('close-verification').value = data.current_status;
-                    const closeTaskModal = new bootstrap.Modal(document.getElementById('closeTaskModal'));
-                    closeTaskModal.show();
-                } else {
-                    alert(data.message);
-                }
-            }).catch(error => {
-                console.error('Error fetching task details:', error);
-                alert('An error occurred while fetching task details.');
-            });
+                })
+                .catch(error => {
+                    console.error('Error fetching task details:', error);
+                    alert('An error occurred while fetching task details.');
+                });
         }
 
         function handleCloseTaskForm(event) {
             event.preventDefault();
             const form = event.target;
-            fetch('update-status.php', { method: 'POST', body: new FormData(form) }).then(response => response.json()).then(data => {
-                if (data.success) {
-                    const closeTaskModal = bootstrap.Modal.getInstance(document.getElementById('closeTaskModal'));
-                    closeTaskModal.hide();
-                    document.getElementById('success-task-name').innerText = data.task_name;
-                    document.getElementById('success-message').innerText = data.message;
-                    const successModal = new bootstrap.Modal(document.getElementById('successModal'));
-                    successModal.show();
-                    setTimeout(() => window.location.reload(), 2000);
-                } else {
-                    alert(data.message);
-                }
-            }).catch(error => {
-                console.error('Error:', error);
-                alert('An error occurred while closing the task.');
-            });
+            fetch('update-status.php', { method: 'POST', body: new FormData(form) })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        bootstrap.Modal.getInstance(document.getElementById('closeTaskModal')).hide();
+                        document.getElementById('success-task-name').innerText = data.task_name;
+                        document.getElementById('success-message').innerText = data.message;
+                        new bootstrap.Modal(document.getElementById('successModal')).show();
+                        setTimeout(() => window.location.reload(), 2000);
+                    } else {
+                        alert(data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while closing the task.');
+                });
         }
 
         function showPredecessorSection(predecessorTaskId, predecessorTaskName) {
             const predecessorSection = document.getElementById('predecessor-task-section');
-            if (predecessorTaskId && predecessorTaskName !== 'N/A') {
-                predecessorSection.style.display = 'block';
-            } else {
-                predecessorSection.style.display = 'none';
-            }
+            predecessorSection.style.display = (predecessorTaskId && predecessorTaskName !== 'N/A') ? 'block' : 'none';
         }
 
         function handleReassignmentForm(event) {
@@ -1868,22 +1851,23 @@ function getWeekdayHours($start, $end)
             const form = event.target;
             const formData = new FormData(form);
             formData.set('status', 'Reassigned');
-            fetch('reassign-task.php', { method: 'POST', body: formData }).then(response => response.json()).then(data => {
-                if (data.success) {
-                    const reassignmentModal = bootstrap.Modal.getInstance(document.getElementById('reassignmentModal'));
-                    reassignmentModal.hide();
-                    document.getElementById('success-task-name').innerText = data.task_name;
-                    document.getElementById('success-message').innerText = data.message;
-                    const successModal = new bootstrap.Modal(document.getElementById('successModal'));
-                    successModal.show();
-                    setTimeout(() => window.location.reload(), 2000);
-                } else {
-                    alert(data.message);
-                }
-            }).catch(error => {
-                console.error('Error:', error);
-                alert('An error occurred while reassigning the task.');
-            });
+            fetch('reassign-task.php', { method: 'POST', body: formData })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        bootstrap.Modal.getInstance(document.getElementById('reassignmentModal')).hide();
+                        document.getElementById('success-task-name').innerText = data.task_name;
+                        document.getElementById('success-message').innerText = data.message;
+                        new bootstrap.Modal(document.getElementById('successModal')).show();
+                        setTimeout(() => window.location.reload(), 2000);
+                    } else {
+                        alert(data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while reassigning the task.');
+                });
         }
 
         function showDelayedDetails(taskName, completionDate, delayReason, completionDescription) {
@@ -1895,33 +1879,28 @@ function getWeekdayHours($start, $end)
 
         function handleCompletionForm(event) {
             event.preventDefault();
-            const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-            document.getElementById('actual-completion-date').value = now;
+            document.getElementById('actual-completion-date').value = new Date().toISOString().slice(0, 19).replace('T', ' ');
             const form = event.target;
-            fetch('update-status.php', { method: 'POST', body: new FormData(form) }).then(response => response.json()).then(data => {
-                if (data.success) {
-                    const completionModal = bootstrap.Modal.getInstance(document.getElementById('completionModal'));
-                    completionModal.hide();
-                    document.getElementById('success-task-name').innerText = data.task_name;
-                    document.getElementById('success-message').innerText = data.message;
-                    const successModal = new bootstrap.Modal(document.getElementById('successModal'));
-                    successModal.show();
-                    setTimeout(() => window.location.reload(), 2000);
-                } else {
-                    alert(data.message);
-                }
-            }).catch(error => {
-                console.error('Error:', error);
-                alert('An error occurred while updating the status.');
-            });
+            fetch('update-status.php', { method: 'POST', body: new FormData(form) })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        bootstrap.Modal.getInstance(document.getElementById('completionModal')).hide();
+                        document.getElementById('success-task-name').innerText = data.task_name;
+                        document.getElementById('success-message').innerText = data.message;
+                        new bootstrap.Modal(document.getElementById('successModal')).show();
+                        setTimeout(() => window.location.reload(), 2000);
+                    } else {
+                        alert(data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while updating the status.');
+                });
         }
-    </script>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
-        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
-        crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
-    <script>
+        // Table Filtering and Pagination
         $(document).ready(function () {
             const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
             document.cookie = "user_timezone=" + userTimeZone;
@@ -1937,36 +1916,22 @@ function getWeekdayHours($start, $end)
                 const selectedDepartments = $('#department-filter').val() || [];
                 let startDate = $('#start-date').val();
                 let endDate = $('#end-date').val();
-
-                // Get the min and max dates from the input attributes
                 const minDate = $('#start-date').attr('min');
                 const maxDate = $('#start-date').attr('max');
 
-                // Validate startDate and endDate
                 if (startDate) {
                     const startDateObj = new Date(startDate);
                     const minDateObj = new Date(minDate);
                     const maxDateObj = new Date(maxDate);
-                    if (startDateObj < minDateObj) {
-                        startDate = minDate; // Reset to minDate if earlier
-                        $('#start-date').val(minDate);
-                    } else if (startDateObj > maxDateObj) {
-                        startDate = maxDate; // Reset to maxDate if later
-                        $('#start-date').val(maxDate);
-                    }
+                    if (startDateObj < minDateObj) startDate = minDate, $('#start-date').val(minDate);
+                    else if (startDateObj > maxDateObj) startDate = maxDate, $('#start-date').val(maxDate);
                 }
-
                 if (endDate) {
                     const endDateObj = new Date(endDate);
                     const minDateObj = new Date(minDate);
                     const maxDateObj = new Date(maxDate);
-                    if (endDateObj < minDateObj) {
-                        endDate = minDate; // Reset to minDate if earlier
-                        $('#end-date').val(minDate);
-                    } else if (endDateObj > maxDateObj) {
-                        endDate = maxDate; // Reset to maxDate if later
-                        $('#end-date').val(maxDate);
-                    }
+                    if (endDateObj < minDateObj) endDate = minDate, $('#end-date').val(minDate);
+                    else if (endDateObj > maxDateObj) endDate = maxDate, $('#end-date').val(maxDate);
                 }
 
                 const pendingVisibleRows = filterAndPaginateTable('#pending-tasks', selectedProjects, selectedDepartments, startDate, endDate, currentPage);
@@ -2001,9 +1966,7 @@ function getWeekdayHours($start, $end)
                     const departmentMatch = selectedDepartments.length === 0 || selectedDepartments.includes('All') || departmentName.split(', ').some(dept => selectedDepartments.includes(dept));
                     const statusMatch = tableId !== '#pending-tasks' || selectedStatuses.length === 0 || selectedStatuses.includes('All') || selectedStatuses.includes(taskStatus);
 
-                    if (projectMatch && departmentMatch && statusMatch && dateInRange) {
-                        visibleRows.push(this);
-                    }
+                    if (projectMatch && departmentMatch && statusMatch && dateInRange) visibleRows.push(this);
                 });
 
                 rows.hide();
@@ -2019,43 +1982,18 @@ function getWeekdayHours($start, $end)
                 }
 
                 const noDataAlert = $(`${tableId} + .alert`);
-                if (visibleRows.length === 0 || rowsToShow.length === 0) {
-                    noDataAlert.show();
-                } else {
-                    noDataAlert.hide();
-                }
+                noDataAlert.toggle(visibleRows.length === 0 || rowsToShow.length === 0);
 
                 return visibleRows.length;
             }
 
-            function resetTaskNumbering(tableId) {
-                const rows = $(`${tableId} tbody tr`);
-                rows.each(function (index) {
-                    $(this).find('td:first-child').text(index + 1);
-                });
-            }
-
-            $('#status-filter').on('change', function () {
-                currentPage = 1;
-                applyFilters();
-            });
-
             function updatePagination(pendingVisibleRows, completedVisibleRows) {
                 const totalPages = Math.max(Math.ceil(pendingVisibleRows / tasksPerPage), Math.ceil(completedVisibleRows / tasksPerPage));
-                const pagination = $('.pagination');
-                pagination.empty();
+                const pagination = $('.pagination').empty();
 
-                if (currentPage > 1) {
-                    pagination.append(`<a href="#" class="page-link" data-page="${currentPage - 1}">Previous</a>`);
-                }
-
-                for (let i = 1; i <= totalPages; i++) {
-                    pagination.append(`<a href="#" class="page-link ${i === currentPage ? 'active' : ''}" data-page="${i}">${i}</a>`);
-                }
-
-                if (currentPage < totalPages) {
-                    pagination.append(`<a href="#" class="page-link" data-page="${currentPage + 1}">Next</a>`);
-                }
+                if (currentPage > 1) pagination.append(`<a href="#" class="page-link" data-page="${currentPage - 1}">Previous</a>`);
+                for (let i = 1; i <= totalPages; i++) pagination.append(`<a href="#" class="page-link ${i === currentPage ? 'active' : ''}" data-page="${i}">${i}</a>`);
+                if (currentPage < totalPages) pagination.append(`<a href="#" class="page-link" data-page="${currentPage + 1}">Next</a>`);
             }
 
             $(document).on('click', '.page-link', function (e) {
@@ -2064,7 +2002,7 @@ function getWeekdayHours($start, $end)
                 applyFilters();
             });
 
-            $('#project-filter, #department-filter, #start-date, #end-date').on('change', function () {
+            $('#project-filter, #department-filter, #start-date, #end-date, #status-filter').on('change', function () {
                 currentPage = 1;
                 applyFilters();
             });
@@ -2076,200 +2014,215 @@ function getWeekdayHours($start, $end)
                 $('#end-date').val('');
                 $('#status-filter').val(['Assigned']).trigger('change');
                 currentPage = 1;
-                resetTaskNumbering('#pending-tasks');
-                resetTaskNumbering('#remaining-tasks');
-                $('#no-data-alert-pending').hide();
-                $('#no-data-alert-completed').hide();
                 applyFilters();
             }
 
             $('.btn-primary[onclick="resetFilters()"]').on('click', resetFilters);
             applyFilters();
         });
-    </script>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const taskDescriptionModal = document.getElementById('taskDescriptionModal');
-            taskDescriptionModal.addEventListener('show.bs.modal', function (event) {
-                const button = event.relatedTarget;
-                const description = button.getAttribute('data-description');
-                const modalBody = taskDescriptionModal.querySelector('.modal-body p');
-                modalBody.textContent = description;
-            });
-        });
-
+        // Timezone Conversion and Description Handling
         document.addEventListener('DOMContentLoaded', function () {
             function convertUTCTimeToLocal() {
-                const timestampCells = document.querySelectorAll('td[data-utc]');
-                timestampCells.forEach(cell => {
+                document.querySelectorAll('td[data-utc]').forEach(cell => {
                     const utcTimestamp = cell.getAttribute('data-utc');
                     const options = { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone };
-                    const localTime = new Date(utcTimestamp).toLocaleString('en-US', options);
-                    cell.textContent = localTime;
+                    cell.textContent = new Date(utcTimestamp).toLocaleString('en-US', options);
                 });
             }
             convertUTCTimeToLocal();
-        });
 
-        document.addEventListener('DOMContentLoaded', function () {
+            const taskDescriptionModal = document.getElementById('taskDescriptionModal');
+            taskDescriptionModal.addEventListener('show.bs.modal', function (event) {
+                const button = event.relatedTarget;
+                document.querySelector('#full-task-description').textContent = button.getAttribute('data-description');
+            });
+
             function checkDescriptionHeight() {
-                const descriptionContainers = document.querySelectorAll('.task-description-container');
-                descriptionContainers.forEach(container => {
+                document.querySelectorAll('.task-description-container').forEach(container => {
                     const descriptionElement = container.querySelector('.task-description');
                     const seeMoreLink = container.querySelector('.see-more-link');
                     const lineHeight = parseInt(window.getComputedStyle(descriptionElement).lineHeight);
-                    const maxHeight = lineHeight * 2;
-                    if (descriptionElement.scrollHeight > maxHeight) {
-                        seeMoreLink.style.display = 'block';
-                    }
+                    seeMoreLink.style.display = (descriptionElement.scrollHeight > lineHeight * 2) ? 'block' : 'none';
                 });
             }
             checkDescriptionHeight();
             window.addEventListener('resize', checkDescriptionHeight);
         });
 
+        // Project and Task Modal Interactions
         function fetchPredecessorTasks(projectId) {
             if (!projectId) {
                 document.getElementById('predecessor_task_id').innerHTML = '<option value="">Select a predecessor task</option>';
                 return;
             }
-            const projectType = document.getElementById('project_type').value; // Get project_type from dropdown
             fetch('fetch-predecessor-tasks.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: `project_id=${encodeURIComponent(projectId)}&user_id=<?= $user_id ?>&project_type=${encodeURIComponent(projectType)}`
-            }).then(response => response.json()).then(data => {
-                const predecessorDropdown = document.getElementById('predecessor_task_id');
-                predecessorDropdown.innerHTML = '<option value="">Select a predecessor task</option>';
-                if (Array.isArray(data) && data.length > 0) {
-                    data.forEach(task => {
-                        const option = document.createElement('option');
-                        option.value = task.task_id;
-                        option.textContent = task.task_name;
-                        predecessorDropdown.appendChild(option);
-                    });
-                } else {
-                    const option = document.createElement('option');
-                    option.value = '';
-                    option.textContent = 'No available predecessor tasks';
-                    option.disabled = true;
-                    predecessorDropdown.appendChild(option);
-                }
-            }).catch(error => console.error('Error fetching predecessor tasks:', error));
-        }
-
-        document.getElementById('project_name_dropdown').addEventListener('change', function () {
-            fetchPredecessorTasks(this.value);
-        });
-        document.getElementById('project_type').addEventListener('change', function () {
-            const projectId = document.getElementById('project_name_dropdown').value;
-            if (projectId) {
-                fetchPredecessorTasks(projectId);
-            }
-        });
-        document.getElementById('manageProjectForm').addEventListener('submit', function (event) {
-            event.preventDefault(); // Prevent default form submission
-            event.stopImmediatePropagation(); // Prevent multiple triggers of the same event
-
-            const form = this;
-            const submitBtn = document.getElementById('submitProjectBtn');
-            submitBtn.disabled = true; // Disable button to prevent multiple submissions
-
-            fetch('manage-project.php', {
-                method: 'POST',
-                body: new FormData(form)
+                body: `project_id=${encodeURIComponent(projectId)}&user_id=<?= $user_id ?>`
             })
                 .then(response => response.json())
                 .then(data => {
-                    alert(data.message); // Show message regardless of success for clarity
-                    if (data.success) {
-                        location.reload(); // Reload only on success
+                    const predecessorDropdown = document.getElementById('predecessor_task_id');
+                    predecessorDropdown.innerHTML = '<option value="">Select a predecessor task</option>';
+                    if (data.success && Array.isArray(data.tasks) && data.tasks.length > 0) {
+                        data.tasks.forEach(task => {
+                            const option = document.createElement('option');
+                            option.value = task.task_id;
+                            option.textContent = task.task_name;
+                            predecessorDropdown.appendChild(option);
+                        });
+                    } else {
+                        const option = document.createElement('option');
+                        option.value = '';
+                        option.textContent = 'No available predecessor tasks';
+                        option.disabled = true;
+                        predecessorDropdown.appendChild(option);
                     }
                 })
-                .catch(error => {
-                    console.error('Error submitting form:', error);
-                    alert('Error submitting form.');
-                })
-                .finally(() => {
-                    submitBtn.disabled = false; // Re-enable button after request completes
-                });
-        }, { once: true }); // Ensure listener is added only once
+                .catch(error => console.error('Error fetching predecessor tasks:', error));
+        }
 
-        // Reset form to "create" mode when modal opens or project selection changes
-        document.getElementById('createProjectModal').addEventListener('show.bs.modal', function () {
-            resetProjectForm();
-        });
-
-        document.getElementById('existing_projects').addEventListener('change', function () {
-            resetProjectForm();
-            const projectId = this.value;
-            if (projectId) {
-                fetchProjectDetails(projectId); // Optional: Pre-fill on selection
-            }
-        });
+        function toggleExternalFields() {
+            const projectType = document.getElementById('project_type').value;
+            const externalFields = document.getElementById('external-project-fields');
+            externalFields.style.display = projectType === 'External' ? 'block' : 'none';
+        }
 
         function resetProjectForm() {
             document.getElementById('new_project_name').value = '';
+            document.getElementById('project_type').value = 'Internal';
             document.getElementById('project_id').value = '';
             document.getElementById('project_action').value = 'create';
             document.getElementById('submitProjectBtn').textContent = 'Create Project';
+            document.getElementById('existing_projects').value = ''; // Reset dropdown
+            document.getElementById('customer_name').value = '';
+            document.getElementById('customer_email').value = '';
+            document.getElementById('customer_mobile').value = '';
+            document.getElementById('cost').value = '';
+            document.getElementById('project_manager').value = '';
+            toggleExternalFields();
         }
 
         function fetchProjectDetails(projectId) {
+            if (!projectId || projectId === '0' || projectId === '') {
+                alert('Please select a valid project from the dropdown.');
+                return;
+            }
+
+            console.log('Fetching details for project ID:', projectId); // Debug log
+
             fetch('get-project-details.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: `project_id=${encodeURIComponent(projectId)}`
-            }).then(response => response.json()).then(data => {
-                if (data.success) {
-                    document.getElementById('new_project_name').value = data.project_name;
-                    document.getElementById('project_id').value = projectId;
-                    document.getElementById('project_action').value = 'edit';
-                    document.getElementById('submitProjectBtn').textContent = 'Update Project';
-                } else {
-                    alert(data.message);
-                    resetProjectForm();
-                }
-            }).catch(error => {
-                console.error('Error fetching project details:', error);
-                alert('Error fetching project details.');
-                resetProjectForm();
-            });
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok: ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Response from get-project-details.php:', data); // Debug log
+                    if (data.success) {
+                        document.getElementById('new_project_name').value = data.project_name || '';
+                        document.getElementById('project_type').value = data.project_type || 'Internal';
+                        document.getElementById('project_id').value = projectId; // Explicitly set project_id
+                        document.getElementById('project_action').value = 'edit';
+                        document.getElementById('submitProjectBtn').textContent = 'Update Project';
+
+                        if (data.project_type === 'External') {
+                            document.getElementById('customer_name').value = data.customer_name || '';
+                            document.getElementById('customer_email').value = data.customer_email || '';
+                            document.getElementById('customer_mobile').value = data.customer_mobile || '';
+                            document.getElementById('cost').value = data.cost !== '' ? data.cost : '';
+                            document.getElementById('project_manager').value = data.project_manager || '';
+                        } else {
+                            document.getElementById('customer_name').value = '';
+                            document.getElementById('customer_email').value = '';
+                            document.getElementById('customer_mobile').value = '';
+                            document.getElementById('cost').value = '';
+                            document.getElementById('project_manager').value = '';
+                        }
+                        toggleExternalFields();
+                        console.log('Form project_id set to:', document.getElementById('project_id').value); // Debug log
+                    } else {
+                        alert(data.message || 'Failed to fetch project details. Please ensure the project exists.');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching project details:', error);
+                    alert('Failed to load project details. Please check your connection and try again.');
+                });
         }
+
+        document.getElementById('project_id').addEventListener('change', function () {
+            fetchPredecessorTasks(this.value);
+        });
+
+        document.getElementById('project_type').addEventListener('change', toggleExternalFields);
+
+        document.getElementById('createProjectModal').addEventListener('show.bs.modal', resetProjectForm);
+
+        // Remove the autofill on dropdown change
+        // document.getElementById('existing_projects').addEventListener('change', function () {
+        //     const projectId = this.value;
+        //     if (projectId) fetchProjectDetails(projectId);
+        //     else resetProjectForm();
+        // });
+
+        document.getElementById('manageProjectForm').addEventListener('submit', function (event) {
+            event.preventDefault();
+            const formData = new FormData(this);
+            const projectId = document.getElementById('project_id').value;
+            const action = document.getElementById('project_action').value;
+            const submitBtn = document.getElementById('submitProjectBtn');
+            submitBtn.disabled = true;
+
+            console.log('Form submission - Action:', action, 'Project ID:', projectId); // Debug log
+            console.log('Form data:', Object.fromEntries(formData)); // Debug log
+
+            if (action === 'edit' && (!projectId || projectId === '' || projectId === '0')) {
+                alert('Please select a project and click "Edit Project" to load its details before submitting.');
+                submitBtn.disabled = false;
+                return;
+            }
+
+            fetch('manage-project.php', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Response from manage-project.php:', data); // Debug log
+                    alert(data.message);
+                    if (data.success) {
+                        location.reload();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error submitting form:', error);
+                    alert('Error submitting form. Please try again.');
+                })
+                .finally(() => {
+                    submitBtn.disabled = false;
+                });
+        });
 
         function editProject() {
             const projectId = document.getElementById('existing_projects').value;
-            if (!projectId) {
-                alert('Please select a project to edit.');
+            if (!projectId || projectId === '0' || projectId === '') {
+                alert('Please select a project to edit from the dropdown.');
                 return;
             }
             fetchProjectDetails(projectId);
         }
 
-        document.getElementById('manageProjectForm').addEventListener('submit', function (event) {
-            event.preventDefault();
-            fetch('manage-project.php', { method: 'POST', body: new FormData(this) }).then(response => response.json()).then(data => {
-                if (data.success) {
-                    alert(data.message);
-                    location.reload();
-                } else {
-                    alert(data.message);
-                }
-            }).catch(error => {
-                console.error('Error submitting form:', error);
-                alert('Error submitting form.');
-            });
-        });
-
         function deleteProject() {
             const projectId = document.getElementById('existing_projects').value;
-            if (!projectId) {
-                alert('Please select a project to delete.');
-                return;
-            }
+            if (!projectId) return alert('Please select a project to delete.');
 
-            // First, check if there are tasks associated with the project
             fetch('manage-project.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -2277,17 +2230,8 @@ function getWeekdayHours($start, $end)
             })
                 .then(response => response.json())
                 .then(data => {
-                    if (!data.success) {
-                        alert(data.message); // E.g., "Error checking tasks for this project."
-                        return;
-                    }
-
-                    if (data.task_count > 0) {
-                        alert(`Cannot delete project. There are ${data.task_count} task(s) associated with it. Please delete or reassign these tasks first.`);
-                        return;
-                    }
-
-                    // If no tasks, proceed with deletion confirmation
+                    if (!data.success) return alert(data.message);
+                    if (data.task_count > 0) return alert(`Cannot delete project. There are ${data.task_count} task(s) associated with it. Please delete or reassign these tasks first.`);
                     if (confirm('Are you sure you want to delete this project?')) {
                         fetch('manage-project.php', {
                             method: 'POST',
@@ -2314,30 +2258,6 @@ function getWeekdayHours($start, $end)
                     alert('Error checking tasks for project.');
                 });
         }
-
-        document.getElementById('project_type').addEventListener('change', function () {
-            const externalFields = document.getElementById('external-fields');
-            const projectId = document.getElementById('project_name_dropdown').value;
-            if (this.value === 'External') {
-                externalFields.style.display = 'block';
-            } else {
-                externalFields.style.display = 'none';
-            }
-            if (projectId) {
-                fetchPredecessorTasks(projectId); // Refresh predecessor tasks if project is selected
-            }
-        });
-
-        // Show external fields when modal opens if "External" is already selected
-        document.getElementById('taskManagementModal').addEventListener('show.bs.modal', function () {
-            const projectType = document.getElementById('project_type').value;
-            const externalFields = document.getElementById('external-fields');
-            if (projectType === 'External') {
-                externalFields.style.display = 'block';
-            } else {
-                externalFields.style.display = 'none';
-            }
-        });
     </script>
 </body>
 
