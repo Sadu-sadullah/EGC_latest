@@ -1222,6 +1222,7 @@ function getWeekdayHours($start, $end)
                                     <th>Cost</th>
                                     <th>Project Manager</th>
                                 <?php endif; ?>
+                                <th>Attachments</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1351,6 +1352,24 @@ function getWeekdayHours($start, $end)
                                             <td>N/A</td>
                                         <?php endif; ?>
                                     <?php endif; ?>
+                                    <td>
+                                        <?php
+                                        $attachmentStmt = $conn->prepare("SELECT filename, filepath, status_at_upload FROM task_attachments WHERE task_id = ? ORDER BY uploaded_at ASC");
+                                        $attachmentStmt->bind_param("i", $row['task_id']);
+                                        $attachmentStmt->execute();
+                                        $attachments = $attachmentStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                                        if ($attachments) {
+                                            foreach ($attachments as $attachment) {
+                                                $link = 'serve-attachment.php?file=' . urlencode($attachment['filename']);
+                                                $status_at_upload = htmlspecialchars($attachment['status_at_upload']);
+                                                echo '<a href="' . htmlspecialchars($link) . '" target="_blank">' . htmlspecialchars($attachment['filename']) . '</a> (' . $status_at_upload . ')<br>';
+                                            }
+                                        } else {
+                                            echo 'No attachments';
+                                        }
+                                        $attachmentStmt->close();
+                                        ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -1388,6 +1407,7 @@ function getWeekdayHours($start, $end)
                                     <th>Cost</th>
                                     <th>Project Manager</th>
                                 <?php endif; ?>
+                                <th>Attachments</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1407,7 +1427,7 @@ function getWeekdayHours($start, $end)
                                                 data-description="<?= htmlspecialchars($row['completion_description']) ?>"><?= htmlspecialchars($row['task_name']) ?></a>
                                         <?php elseif ($row['status'] === 'Delayed Completion' || $isClosedFromDelayedCompletion): ?>
                                             <a href="#" data-bs-toggle="modal" data-bs-target="#delayedCompletionModal"
-                                                onclick="showDelayedDetails('<?= htmlspecialchars($row['task_name']) ?>', '<?= htmlspecialchars($row['task_actual_finish_date']) ?>', '<?= htmlspecialchars($row['delayed_reason']) ?>', '<?= htmlspecialchars($row['completion_description']) ?>')"><?= htmlspecialchars($row['task_name']) ?></a>
+                                                onclick="showDelayedDetails('<?= htmlspecialchars($row['task_name'] ?? '') ?>', '<?= htmlspecialchars($row['task_actual_finish_date'] ?? '') ?>', '<?= htmlspecialchars($row['delayed_reason'] ?? '') ?>', '<?= htmlspecialchars($row['completion_description'] ?? '') ?>')"><?= htmlspecialchars($row['task_name'] ?? '') ?></a>
                                         <?php else: ?>
                                             <?= htmlspecialchars($row['task_name']) ?>
                                         <?php endif; ?>
@@ -1515,6 +1535,24 @@ function getWeekdayHours($start, $end)
                                             <td>N/A</td>
                                         <?php endif; ?>
                                     <?php endif; ?>
+                                    <td>
+                                        <?php
+                                        $attachmentStmt = $conn->prepare("SELECT filename, filepath, status_at_upload FROM task_attachments WHERE task_id = ? ORDER BY uploaded_at ASC");
+                                        $attachmentStmt->bind_param("i", $row['task_id']);
+                                        $attachmentStmt->execute();
+                                        $attachments = $attachmentStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                                        if ($attachments) {
+                                            foreach ($attachments as $attachment) {
+                                                $link = 'serve-attachment.php?file=' . urlencode($attachment['filename']);
+                                                $status_at_upload = htmlspecialchars($attachment['status_at_upload']);
+                                                echo '<a href="' . htmlspecialchars($link) . '" target="_blank">' . htmlspecialchars($attachment['filename']) . '</a> (' . $status_at_upload . ')<br>';
+                                            }
+                                        } else {
+                                            echo 'No attachments';
+                                        }
+                                        $attachmentStmt->close();
+                                        ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -1531,9 +1569,10 @@ function getWeekdayHours($start, $end)
         aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
-                <form id="completionForm" method="POST" onsubmit="handleCompletionForm(event)">
+                <form id="completionForm" method="POST" enctype="multipart/form-data"
+                    onsubmit="handleCompletionForm(event)">
                     <div class="modal-header">
-                        <h5 class="modal-title" id="completionModalLabel">Task Completion</h5>
+                        <h5 class="modal-title" id="completionModalLabel">Task Status Update</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
@@ -1543,8 +1582,9 @@ function getWeekdayHours($start, $end)
                         <input type="hidden" id="predecessor-task-id" name="predecessor_task_id">
                         <p id="predecessor-task-section" style="display: none;"><strong>Predecessor Task:</strong> <span
                                 id="predecessor-task-name"></span></p>
-                        <div class="mb-3">
-                            <label for="completion-description" class="form-label">What was completed?</label>
+                        <div class="mb-3" id="description-container">
+                            <label for="completion-description" class="form-label">What was completed or
+                                started?</label>
                             <textarea class="form-control" id="completion-description" name="completion_description"
                                 rows="3" required></textarea>
                         </div>
@@ -1552,6 +1592,13 @@ function getWeekdayHours($start, $end)
                             <label for="delayed-reason" class="form-label">Why was it completed late?</label>
                             <textarea class="form-control" id="delayed-reason" name="delayed_reason"
                                 rows="3"></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label for="attachment" class="form-label">Upload Proof (PDF, Image, etc.):</label>
+                            <input type="file" class="form-control" id="attachment" name="attachment"
+                                accept=".pdf,.jpg,.jpeg,.png">
+                            <small class="form-text text-muted">Max file size: 5MB. Allowed types: PDF, JPG,
+                                PNG.</small>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -1740,7 +1787,7 @@ function getWeekdayHours($start, $end)
             if (status === 'Reassigned') {
                 document.getElementById('reassign-task-id').value = taskId;
                 new bootstrap.Modal(document.getElementById('reassignmentModal')).show();
-            } else if (status === 'Delayed Completion' || status === 'Completed on Time') {
+            } else if (status === 'In Progress' || status === 'Delayed Completion' || status === 'Completed on Time') {
                 document.getElementById('task-id').value = taskId;
                 document.getElementById('modal-status').value = status;
                 document.getElementById('predecessor-task-id').value = predecessorTaskId;
@@ -1751,18 +1798,15 @@ function getWeekdayHours($start, $end)
                             predecessorTaskName = data.task_name || 'N/A';
                             document.getElementById('predecessor-task-name').innerText = predecessorTaskName;
                             showPredecessorSection(predecessorTaskId, predecessorTaskName);
-                        })
-                        .catch(error => {
-                            console.error('Error fetching predecessor task name:', error);
-                            document.getElementById('predecessor-task-name').innerText = 'N/A';
-                            showPredecessorSection(predecessorTaskId, 'N/A');
                         });
                 } else {
                     document.getElementById('predecessor-task-name').innerText = predecessorTaskName;
                     showPredecessorSection(predecessorTaskId, predecessorTaskName);
                 }
                 const delayedReasonContainer = document.getElementById('delayed-reason-container');
-                if (delayedReasonContainer) delayedReasonContainer.style.display = (status === 'Delayed Completion') ? 'block' : 'none';
+                const descriptionLabel = document.querySelector('#description-container .form-label');
+                delayedReasonContainer.style.display = (status === 'Delayed Completion') ? 'block' : 'none';
+                descriptionLabel.textContent = (status === 'In Progress') ? 'What was started?' : 'What was completed?';
                 new bootstrap.Modal(document.getElementById('completionModal')).show();
             } else if (status === 'Closed') {
                 fetchTaskDetailsForClosure(taskId);
@@ -1778,10 +1822,6 @@ function getWeekdayHours($start, $end)
                         } else {
                             alert(data.message);
                         }
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        alert('An error occurred while updating the status.');
                     });
             }
         }
@@ -1879,10 +1919,24 @@ function getWeekdayHours($start, $end)
 
         function handleCompletionForm(event) {
             event.preventDefault();
-            document.getElementById('actual-completion-date').value = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            const actualFinishDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            document.getElementById('actual-completion-date').value = actualFinishDate;
+            console.log('Actual Finish Date:', actualFinishDate); // Debug log
             const form = event.target;
-            fetch('update-status.php', { method: 'POST', body: new FormData(form) })
-                .then(response => response.json())
+            const formData = new FormData(form);
+
+            fetch('update-status.php', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.text().then(text => {
+                            throw new Error('Server error (HTTP ' + response.status + '): ' + text);
+                        });
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     if (data.success) {
                         bootstrap.Modal.getInstance(document.getElementById('completionModal')).hide();
@@ -1890,13 +1944,44 @@ function getWeekdayHours($start, $end)
                         document.getElementById('success-message').innerText = data.message;
                         new bootstrap.Modal(document.getElementById('successModal')).show();
                         setTimeout(() => window.location.reload(), 2000);
+                    } else if (data.confirm_duration) {
+                        if (confirm(data.message)) {
+                            formData.append('force_proceed', 'true');
+                            fetch('update-status.php', {
+                                method: 'POST',
+                                body: formData
+                            })
+                                .then(response => {
+                                    if (!response.ok) {
+                                        return response.text().then(text => {
+                                            throw new Error('Server error (HTTP ' + response.status + '): ' + text);
+                                        });
+                                    }
+                                    return response.json();
+                                })
+                                .then(data => {
+                                    if (data.success) {
+                                        bootstrap.Modal.getInstance(document.getElementById('completionModal')).hide();
+                                        document.getElementById('success-task-name').innerText = data.task_name;
+                                        document.getElementById('success-message').innerText = data.message;
+                                        new bootstrap.Modal(document.getElementById('successModal')).show();
+                                        setTimeout(() => window.location.reload(), 2000);
+                                    } else {
+                                        alert(data.message);
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('Fetch error on confirmation:', error);
+                                    alert('Failed to update status: ' + error.message);
+                                });
+                        }
                     } else {
                         alert(data.message);
                     }
                 })
                 .catch(error => {
-                    console.error('Error:', error);
-                    alert('An error occurred while updating the status.');
+                    console.error('Fetch error:', error);
+                    alert('Failed to update status: ' + error.message);
                 });
         }
 

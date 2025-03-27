@@ -1,23 +1,21 @@
 <?php
-// Enable error reporting for debugging (consider disabling in production)
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+ini_set('display_errors', 0);
+ini_set('display_startup_errors', 0);
+ini_set('log_errors', 1);
+ini_set('error_log', __DIR__ . '/error.log');
 error_reporting(E_ALL);
 
-// Ensure proper JSON response
 header('Content-Type: application/json');
-ob_start(); // Start output buffering
+ob_start();
 
 session_start();
 
-// Check if the user is logged in
 if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
     ob_end_clean();
     echo json_encode(['success' => false, 'message' => 'Unauthorized access.']);
     exit;
 }
 
-// Get the user's timezone from cookies
 if (isset($_COOKIE['user_timezone'])) {
     date_default_timezone_set($_COOKIE['user_timezone']);
 } else {
@@ -26,26 +24,22 @@ if (isset($_COOKIE['user_timezone'])) {
 
 $currentTime = date('Y-m-d H:i:s');
 
-// Include the configuration file
 $configPath = realpath(__DIR__ . '/../config.php');
 if (!file_exists($configPath)) {
     ob_end_clean();
-    echo json_encode(['success' => false, 'message' => 'Config file not found.']);
+    echo json_encode(['success' => false, 'message' => 'Config file not found at: ' . $configPath]);
     exit;
 }
 $config = include $configPath;
 
-// Database connection details
 $dbHost = 'localhost';
-$dbUsername = $config['dbUsername'] ?? null;
-$dbPassword = $config['dbPassword'] ?? null;
+$dbUsername = $config['dbUsername'];
+$dbPassword = $config['dbPassword'];
 $dbName = 'new';
 
-// DSN for PDO
 $dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8";
 
 try {
-    // Establish database connection using PDO
     $pdo = new PDO($dsn, $dbUsername, $dbPassword);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch (PDOException $e) {
@@ -56,41 +50,32 @@ try {
 
 include 'permissions.php';
 
-// Function to calculate actual duration in hours (similar to getWeekdayHours but simpler for this case)
-function calculateActualDuration($start, $end) {
-    if (!$start || !$end || $start >= $end) {
+function calculateActualDuration($start, $end)
+{
+    if (!$start || !$end || $start >= $end)
         return 0;
-    }
-    $startTime = strtotime($start);
-    $endTime = strtotime($end);
-    return ($endTime - $startTime) / 3600; // Convert seconds to hours
+    return (strtotime($end) - strtotime($start)) / 3600;
 }
 
 try {
-    // Validate user input
     $user_id = $_SESSION['user_id'] ?? null;
     $task_id = $_POST['task_id'] ?? null;
     $new_status = $_POST['status'] ?? null;
     $completion_description = $_POST['completion_description'] ?? null;
     $delayed_reason = $_POST['delayed_reason'] ?? null;
     $verified_status = $_POST['verified_status'] ?? null;
-    $actual_finish_date = $_POST['actual_finish_date'] ?? $currentTime; // Use provided finish date or current time
+    $actual_finish_date = $_POST['actual_finish_date'] ?? $currentTime;
 
     if (!$task_id || !$new_status) {
-        ob_end_clean();
-        echo json_encode(['success' => false, 'message' => 'Invalid request parameters.']);
-        exit;
+        throw new Exception('Invalid request parameters.');
     }
 
-    // Fetch the current task details
     $stmt = $pdo->prepare("SELECT status, assigned_by_id, user_id, task_name, predecessor_task_id, completion_description, actual_finish_date, actual_start_date FROM tasks WHERE task_id = ?");
     $stmt->execute([$task_id]);
     $task = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$task) {
-        ob_end_clean();
-        echo json_encode(['success' => false, 'message' => 'Task not found.']);
-        exit;
+        throw new Exception('Task not found.');
     }
 
     $current_status = $task['status'];
@@ -98,29 +83,45 @@ try {
     $assigned_user_id = $task['user_id'];
     $task_name = $task['task_name'];
     $predecessor_task_id = $task['predecessor_task_id'];
-    $existing_completion_description = $task['completion_description'];
-    $existing_actual_finish_date = $task['actual_finish_date'];
     $actual_start_date = $task['actual_start_date'];
 
-    // Define status categories
+    function getWeekdayHours($start, $end)
+    {
+        if ($start >= $end) {
+            return 0; // Invalid range
+        }
+
+        $weekdayHours = 0;
+        $current = $start;
+
+        while ($current < $end) {
+            $dayOfWeek = date('N', $current);
+            if ($dayOfWeek <= 5) { // Monday to Friday
+                $startOfDay = strtotime('today', $current);
+                $endOfDay = strtotime('tomorrow', $current) - 1;
+
+                // Determine the start and end times for this day
+                $dayStart = max($start, $startOfDay);
+                $dayEnd = min($end, $endOfDay);
+
+                // Calculate hours for this day
+                $hours = ($dayEnd - $dayStart) / 3600;
+                if ($hours > 0) {
+                    $weekdayHours += $hours;
+                }
+            }
+            $current = strtotime('+1 day', $current);
+        }
+
+        return $weekdayHours;
+    }
+
     $assignerStatuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
     $normalUserStatuses = ['Assigned' => ['In Progress'], 'In Progress' => ['Completed on Time', 'Delayed Completion']];
     $allowedStatuses = array_merge($assignerStatuses, ['Reassigned', 'In Progress', 'Completed on Time', 'Delayed Completion', 'Closed']);
-
-    // Check if the task is self-assigned
     $isSelfAssigned = ($assigned_by_id == $user_id && $assigned_user_id == $user_id);
 
-    // Permission validation
-    if (!function_exists('hasPermission')) {
-        function hasPermission($perm) {
-            return false; // Default to no permission if the function is missing
-        }
-    }
-
-    // Initialize allowed status array
     $statuses = [];
-
-    // Logic for users with status_change_main or assigner (excluding self-assigned users)
     if (hasPermission('status_change_main') || ($assigned_by_id == $user_id && !$isSelfAssigned)) {
         if (in_array($current_status, $assignerStatuses)) {
             $statuses = $assignerStatuses;
@@ -128,20 +129,15 @@ try {
             $statuses = ['Closed'];
         }
     }
-
-    // Logic for self-assigned users with status_change_normal
     if ($isSelfAssigned && hasPermission('status_change_normal')) {
         $statuses = $assignerStatuses;
         if (isset($normalUserStatuses[$current_status])) {
             $statuses = array_merge($statuses, $normalUserStatuses[$current_status]);
         } else {
-            if (in_array($current_status, $allowedStatuses)) {
+            if (in_array($current_status, $allowedStatuses))
                 $statuses = $allowedStatuses;
-            }
         }
-    }
-    // Logic for Regular User (assigned user)
-    elseif (hasPermission('status_change_normal') && $user_id === $assigned_user_id) {
+    } elseif (hasPermission('status_change_normal') && $user_id === $assigned_user_id) {
         if (isset($normalUserStatuses[$current_status])) {
             $statuses = $normalUserStatuses[$current_status];
         } elseif ($current_status === 'In Progress') {
@@ -149,49 +145,97 @@ try {
         }
     }
 
-    // Validate the new status
     if ($new_status !== $current_status && !in_array($new_status, $statuses)) {
-        ob_end_clean();
-        echo json_encode(['success' => false, 'message' => 'Invalid status change.']);
-        exit;
+        throw new Exception('Invalid status change.');
     }
 
-    // Check predecessor task completion if moving to "In Progress"
     if ($predecessor_task_id && $new_status === 'In Progress' && $new_status !== $current_status) {
         $predecessorStmt = $pdo->prepare("SELECT status, actual_finish_date FROM tasks WHERE task_id = ?");
         $predecessorStmt->execute([$predecessor_task_id]);
         $predecessorTask = $predecessorStmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$predecessorTask || !in_array($predecessorTask['status'], ['Completed on Time', 'Delayed Completion'])) {
-            ob_end_clean();
-            echo json_encode(['success' => false, 'message' => 'Cannot start this task until the predecessor task is completed.']);
-            exit;
+            throw new Exception('Cannot start this task until the predecessor task is completed.');
         }
-
         $actualStartDate = date('Y-m-d H:i:s', strtotime($predecessorTask['actual_finish_date'] . ' +1 day'));
     } else {
-        $actualStartDate = $actual_start_date ?? $currentTime; // Use existing start date or current time
+        $actualStartDate = $actual_start_date ?? $currentTime;
     }
 
-    // Check actual duration for completion statuses
     if (in_array($new_status, ['Completed on Time', 'Delayed Completion']) && $new_status !== $current_status) {
         if (!$actual_start_date) {
+            throw new Exception('Task must have an actual start date before completion.');
+        }
+        if (!$completion_description) {
+            throw new Exception('Completion description is required for completed statuses.');
+        }
+        // Use actual_start_date from database and current time for finish date
+        $actualStartDate = strtotime($actual_start_date);
+        $actualFinishDate = time(); // Current time, matching tasks.php logic for in-progress/completing tasks
+        $actualDurationHours = getWeekdayHours($actualStartDate, $actualFinishDate); // Use the same function as tasks.php
+        $forceProceed = isset($_POST['force_proceed']) && $_POST['force_proceed'] === 'true';
+        if ($actualDurationHours < 1 && !$forceProceed) {
             ob_end_clean();
-            echo json_encode(['success' => false, 'message' => 'Task must have an actual start date before completion.']);
+            echo json_encode([
+                'success' => false,
+                'confirm_duration' => true,
+                'message' => 'The actual duration is less than 1 hour (' . round($actualDurationHours, 2) . ' hours). Are you sure you want to proceed?',
+                'task_name' => $task_name
+            ]);
             exit;
         }
-
-        $actualDurationHours = calculateActualDuration($actual_start_date, $actual_finish_date);
-        if ($actualDurationHours < 1) {
-            ob_end_clean();
-            echo json_encode(['success' => false, 'message' => 'Error: Actual duration must be at least 1 hour for completion. Current duration is less than 1 hour.']);
-            exit;
-        }
+        // Set actual_finish_date to current time for the update
+        $actual_finish_date = date('Y-m-d H:i:s', $actualFinishDate);
     }
 
-    // Perform task update based on new status
+    // Handle file upload
+    $attachmentPath = null;
+    $transactionStarted = false; // Track if transaction is active
+    if (isset($_FILES['attachment']) && $_FILES['attachment']['error'] !== UPLOAD_ERR_NO_FILE) {
+        $file = $_FILES['attachment'];
+        $allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+        $maxSize = 5 * 1024 * 1024; // 5MB
+        $uploadDir = __DIR__ . '/uploads/';
+
+        if (!file_exists($uploadDir)) {
+            mkdir($uploadDir, 0755, true);
+        }
+        if (!is_writable($uploadDir)) {
+            throw new Exception('Upload directory is not writable: ' . $uploadDir);
+        }
+
+        if (!in_array($file['type'], $allowedTypes)) {
+            throw new Exception('Invalid file type: ' . $file['type'] . '. Only PDF, JPG, and PNG are allowed.');
+        }
+        if ($file['size'] > $maxSize) {
+            throw new Exception('File size exceeds 5MB limit: ' . $file['size']);
+        }
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+            throw new Exception('File upload error code: ' . $file['error']);
+        }
+
+        $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
+        $filename = 'task_' . $task_id . '_' . $new_status . '_' . time() . '.' . $extension;
+        $attachmentPath = $uploadDir . $filename;
+
+        if (!move_uploaded_file($file['tmp_name'], $attachmentPath)) {
+            throw new Exception('Failed to move uploaded file to: ' . $attachmentPath);
+        }
+
+        $pdo->beginTransaction();
+        $transactionStarted = true;
+        $stmt = $pdo->prepare("INSERT INTO task_attachments (task_id, filename, filepath, uploaded_at, status_at_upload, uploaded_by_user_id) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$task_id, $filename, $attachmentPath, $currentTime, $new_status, $user_id]);
+    }
+
+    // Perform task update
+    if (!$transactionStarted && $new_status !== $current_status) {
+        $pdo->beginTransaction();
+        $transactionStarted = true;
+    }
+
     if ($new_status === $current_status) {
-        // No status change intended; skip status update but allow actual_start_date edit below
+        // No status change, but attachment was handled above
     } elseif ($new_status === 'In Progress') {
         $sql = "UPDATE tasks SET status = ?, actual_start_date = COALESCE(actual_start_date, ?) WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);
@@ -202,12 +246,14 @@ try {
         $stmt->execute([$new_status, $completion_description, $actual_finish_date, $task_id]);
 
         if ($new_status === 'Delayed Completion') {
+            if (!$delayed_reason) {
+                throw new Exception('Delayed reason is required for Delayed Completion.');
+            }
             $sql = "INSERT INTO task_transactions (task_id, delayed_reason, actual_finish_date) VALUES (?, ?, ?)";
             $stmt = $pdo->prepare($sql);
             $stmt->execute([$task_id, $delayed_reason, $actual_finish_date]);
         }
     } elseif ($new_status === 'Closed') {
-        // Handle closure with verification
         if ($verified_status === 'Completed on Time' && $current_status === 'Delayed Completion') {
             $sql = "UPDATE tasks SET status = ? WHERE task_id = ?";
             $stmt = $pdo->prepare($sql);
@@ -230,29 +276,28 @@ try {
         $stmt->execute([$new_status, $task_id]);
     }
 
-    // Allow users with status_change_main to update actual_start_date if provided
-    if (isset($_POST['actual_start_date']) && hasPermission('status_change_main') && $task['actual_start_date'] !== null) {
-        $sql = "UPDATE tasks SET actual_start_date = ? WHERE task_id = ?";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([$_POST['actual_start_date'], $task_id]);
-
-        $sql = "INSERT INTO task_timeline (task_id, action, previous_status, new_status, changed_by_user_id) VALUES (?, 'actual_start_date_updated', ?, ?, ?)";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([$task_id, $current_status, $current_status, $user_id]);
-    }
-
-    // Log the status change in task_timeline (only if status actually changed)
     if ($new_status !== $current_status) {
         $sql = "INSERT INTO task_timeline (task_id, action, previous_status, new_status, changed_by_user_id) VALUES (?, 'status_changed', ?, ?, ?)";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$task_id, $current_status, $new_status, $user_id]);
     }
 
-    // Clear buffer and send successful response
+    if ($transactionStarted) {
+        $pdo->commit();
+    }
     ob_end_clean();
     echo json_encode(['success' => true, 'message' => 'Status updated successfully.', 'task_name' => $task_name]);
 } catch (Exception $e) {
+    if (isset($transactionStarted) && $transactionStarted) {
+        $pdo->rollBack();
+    }
     ob_end_clean();
-    echo json_encode(['success' => false, 'message' => 'An error occurred: ' . $e->getMessage()]);
+    echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
+} catch (Throwable $e) {
+    if (isset($transactionStarted) && $transactionStarted) {
+        $pdo->rollBack();
+    }
+    ob_end_clean();
+    echo json_encode(['success' => false, 'message' => 'Unexpected error: ' . $e->getMessage()]);
 }
 ?>
