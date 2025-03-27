@@ -1,5 +1,4 @@
 <?php
-// Disable error display to prevent HTML output
 ini_set('display_errors', 0);
 ini_set('display_startup_errors', 0);
 ini_set('log_errors', 1);
@@ -28,7 +27,7 @@ $currentTime = date('Y-m-d H:i:s');
 $configPath = realpath(__DIR__ . '/../config.php');
 if (!file_exists($configPath)) {
     ob_end_clean();
-    echo json_encode(['success' => false, 'message' => 'Config file not found.']);
+    echo json_encode(['success' => false, 'message' => 'Config file not found at: ' . $configPath]);
     exit;
 }
 $config = include $configPath;
@@ -86,6 +85,37 @@ try {
     $predecessor_task_id = $task['predecessor_task_id'];
     $actual_start_date = $task['actual_start_date'];
 
+    function getWeekdayHours($start, $end)
+    {
+        if ($start >= $end) {
+            return 0; // Invalid range
+        }
+
+        $weekdayHours = 0;
+        $current = $start;
+
+        while ($current < $end) {
+            $dayOfWeek = date('N', $current);
+            if ($dayOfWeek <= 5) { // Monday to Friday
+                $startOfDay = strtotime('today', $current);
+                $endOfDay = strtotime('tomorrow', $current) - 1;
+
+                // Determine the start and end times for this day
+                $dayStart = max($start, $startOfDay);
+                $dayEnd = min($end, $endOfDay);
+
+                // Calculate hours for this day
+                $hours = ($dayEnd - $dayStart) / 3600;
+                if ($hours > 0) {
+                    $weekdayHours += $hours;
+                }
+            }
+            $current = strtotime('+1 day', $current);
+        }
+
+        return $weekdayHours;
+    }
+
     $assignerStatuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
     $normalUserStatuses = ['Assigned' => ['In Progress'], 'In Progress' => ['Completed on Time', 'Delayed Completion']];
     $allowedStatuses = array_merge($assignerStatuses, ['Reassigned', 'In Progress', 'Completed on Time', 'Delayed Completion', 'Closed']);
@@ -139,28 +169,49 @@ try {
         if (!$completion_description) {
             throw new Exception('Completion description is required for completed statuses.');
         }
-        $actualDurationHours = calculateActualDuration($actual_start_date, $actual_finish_date);
-        if ($actualDurationHours < 1) {
-            throw new Exception('Error: Actual duration must be at least 1 hour for completion.');
+        // Use actual_start_date from database and current time for finish date
+        $actualStartDate = strtotime($actual_start_date);
+        $actualFinishDate = time(); // Current time, matching tasks.php logic for in-progress/completing tasks
+        $actualDurationHours = getWeekdayHours($actualStartDate, $actualFinishDate); // Use the same function as tasks.php
+        $forceProceed = isset($_POST['force_proceed']) && $_POST['force_proceed'] === 'true';
+        if ($actualDurationHours < 1 && !$forceProceed) {
+            ob_end_clean();
+            echo json_encode([
+                'success' => false,
+                'confirm_duration' => true,
+                'message' => 'The actual duration is less than 1 hour (' . round($actualDurationHours, 2) . ' hours). Are you sure you want to proceed?',
+                'task_name' => $task_name
+            ]);
+            exit;
         }
+        // Set actual_finish_date to current time for the update
+        $actual_finish_date = date('Y-m-d H:i:s', $actualFinishDate);
     }
 
     // Handle file upload
     $attachmentPath = null;
+    $transactionStarted = false; // Track if transaction is active
     if (isset($_FILES['attachment']) && $_FILES['attachment']['error'] !== UPLOAD_ERR_NO_FILE) {
         $file = $_FILES['attachment'];
         $allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
         $maxSize = 5 * 1024 * 1024; // 5MB
         $uploadDir = __DIR__ . '/uploads/';
 
-        if (!is_dir($uploadDir) || !is_writable($uploadDir)) {
-            throw new Exception('Upload directory is not writable.');
+        if (!file_exists($uploadDir)) {
+            mkdir($uploadDir, 0755, true);
         }
+        if (!is_writable($uploadDir)) {
+            throw new Exception('Upload directory is not writable: ' . $uploadDir);
+        }
+
         if (!in_array($file['type'], $allowedTypes)) {
-            throw new Exception('Invalid file type. Only PDF, JPG, and PNG are allowed.');
+            throw new Exception('Invalid file type: ' . $file['type'] . '. Only PDF, JPG, and PNG are allowed.');
         }
         if ($file['size'] > $maxSize) {
-            throw new Exception('File size exceeds 5MB limit.');
+            throw new Exception('File size exceeds 5MB limit: ' . $file['size']);
+        }
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+            throw new Exception('File upload error code: ' . $file['error']);
         }
 
         $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
@@ -168,17 +219,23 @@ try {
         $attachmentPath = $uploadDir . $filename;
 
         if (!move_uploaded_file($file['tmp_name'], $attachmentPath)) {
-            throw new Exception('Failed to upload file.');
+            throw new Exception('Failed to move uploaded file to: ' . $attachmentPath);
         }
 
+        $pdo->beginTransaction();
+        $transactionStarted = true;
         $stmt = $pdo->prepare("INSERT INTO task_attachments (task_id, filename, filepath, uploaded_at, status_at_upload, uploaded_by_user_id) VALUES (?, ?, ?, ?, ?, ?)");
         $stmt->execute([$task_id, $filename, $attachmentPath, $currentTime, $new_status, $user_id]);
     }
 
     // Perform task update
-    $pdo->beginTransaction();
+    if (!$transactionStarted && $new_status !== $current_status) {
+        $pdo->beginTransaction();
+        $transactionStarted = true;
+    }
+
     if ($new_status === $current_status) {
-        // No status change, but allow attachment
+        // No status change, but attachment was handled above
     } elseif ($new_status === 'In Progress') {
         $sql = "UPDATE tasks SET status = ?, actual_start_date = COALESCE(actual_start_date, ?) WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);
@@ -225,15 +282,21 @@ try {
         $stmt->execute([$task_id, $current_status, $new_status, $user_id]);
     }
 
-    $pdo->commit();
+    if ($transactionStarted) {
+        $pdo->commit();
+    }
     ob_end_clean();
     echo json_encode(['success' => true, 'message' => 'Status updated successfully.', 'task_name' => $task_name]);
 } catch (Exception $e) {
-    $pdo->rollBack();
+    if (isset($transactionStarted) && $transactionStarted) {
+        $pdo->rollBack();
+    }
     ob_end_clean();
-    echo json_encode(['success' => false, 'message' => 'An error occurred: ' . $e->getMessage()]);
+    echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
 } catch (Throwable $e) {
-    $pdo->rollBack();
+    if (isset($transactionStarted) && $transactionStarted) {
+        $pdo->rollBack();
+    }
     ob_end_clean();
     echo json_encode(['success' => false, 'message' => 'Unexpected error: ' . $e->getMessage()]);
 }

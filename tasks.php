@@ -1427,7 +1427,7 @@ function getWeekdayHours($start, $end)
                                                 data-description="<?= htmlspecialchars($row['completion_description']) ?>"><?= htmlspecialchars($row['task_name']) ?></a>
                                         <?php elseif ($row['status'] === 'Delayed Completion' || $isClosedFromDelayedCompletion): ?>
                                             <a href="#" data-bs-toggle="modal" data-bs-target="#delayedCompletionModal"
-                                                onclick="showDelayedDetails('<?= htmlspecialchars($row['task_name']) ?>', '<?= htmlspecialchars($row['task_actual_finish_date']) ?>', '<?= htmlspecialchars($row['delayed_reason']) ?>', '<?= htmlspecialchars($row['completion_description']) ?>')"><?= htmlspecialchars($row['task_name']) ?></a>
+                                                onclick="showDelayedDetails('<?= htmlspecialchars($row['task_name'] ?? '') ?>', '<?= htmlspecialchars($row['task_actual_finish_date'] ?? '') ?>', '<?= htmlspecialchars($row['delayed_reason'] ?? '') ?>', '<?= htmlspecialchars($row['completion_description'] ?? '') ?>')"><?= htmlspecialchars($row['task_name'] ?? '') ?></a>
                                         <?php else: ?>
                                             <?= htmlspecialchars($row['task_name']) ?>
                                         <?php endif; ?>
@@ -1919,9 +1919,11 @@ function getWeekdayHours($start, $end)
 
         function handleCompletionForm(event) {
             event.preventDefault();
-            document.getElementById('actual-completion-date').value = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            const actualFinishDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            document.getElementById('actual-completion-date').value = actualFinishDate;
+            console.log('Actual Finish Date:', actualFinishDate); // Debug log
             const form = event.target;
-            const formData = new FormData(form); // Use FormData to include file uploads
+            const formData = new FormData(form);
 
             fetch('update-status.php', {
                 method: 'POST',
@@ -1930,7 +1932,7 @@ function getWeekdayHours($start, $end)
                 .then(response => {
                     if (!response.ok) {
                         return response.text().then(text => {
-                            throw new Error('Server error: ' + text);
+                            throw new Error('Server error (HTTP ' + response.status + '): ' + text);
                         });
                     }
                     return response.json();
@@ -1942,6 +1944,37 @@ function getWeekdayHours($start, $end)
                         document.getElementById('success-message').innerText = data.message;
                         new bootstrap.Modal(document.getElementById('successModal')).show();
                         setTimeout(() => window.location.reload(), 2000);
+                    } else if (data.confirm_duration) {
+                        if (confirm(data.message)) {
+                            formData.append('force_proceed', 'true');
+                            fetch('update-status.php', {
+                                method: 'POST',
+                                body: formData
+                            })
+                                .then(response => {
+                                    if (!response.ok) {
+                                        return response.text().then(text => {
+                                            throw new Error('Server error (HTTP ' + response.status + '): ' + text);
+                                        });
+                                    }
+                                    return response.json();
+                                })
+                                .then(data => {
+                                    if (data.success) {
+                                        bootstrap.Modal.getInstance(document.getElementById('completionModal')).hide();
+                                        document.getElementById('success-task-name').innerText = data.task_name;
+                                        document.getElementById('success-message').innerText = data.message;
+                                        new bootstrap.Modal(document.getElementById('successModal')).show();
+                                        setTimeout(() => window.location.reload(), 2000);
+                                    } else {
+                                        alert(data.message);
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('Fetch error on confirmation:', error);
+                                    alert('Failed to update status: ' + error.message);
+                                });
+                        }
                     } else {
                         alert(data.message);
                     }
