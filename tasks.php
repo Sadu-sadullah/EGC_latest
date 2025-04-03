@@ -1596,9 +1596,9 @@ function getWeekdayHours($start, $end)
                         <div class="mb-3">
                             <label for="attachment" class="form-label">Upload Proof (PDF, Image, etc.):</label>
                             <input type="file" class="form-control" id="attachment" name="attachment"
-                                accept=".pdf,.jpg,.jpeg,.png">
+                                accept=".pdf,.jpg,.jpeg,.png,.txt,.ppt,.pptx,.xls,.xlsx">
                             <small class="form-text text-muted">Max file size: 5MB. Allowed types: PDF, JPG,
-                                PNG.</small>
+                                PNG, PPT, PPTX, TXT, XLS, XLSX.</small>
                         </div>
                     </div>
                     <div class="modal-footer">
