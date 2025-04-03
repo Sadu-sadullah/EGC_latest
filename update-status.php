@@ -190,10 +190,19 @@ try {
 
     // Handle file upload
     $attachmentPath = null;
-    $transactionStarted = false; // Track if transaction is active
+    $transactionStarted = false;
     if (isset($_FILES['attachment']) && $_FILES['attachment']['error'] !== UPLOAD_ERR_NO_FILE) {
         $file = $_FILES['attachment'];
-        $allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+        $allowedTypes = [
+            'application/pdf',                                      // PDF
+            'image/jpeg',                                          // JPG
+            'image/png',                                           // PNG
+            'application/vnd.ms-powerpoint',                       // PPT
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation', // PPTX
+            'text/plain',                                          // TXT
+            'application/vnd.ms-excel',                            // XLS (Excel)
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // XLSX (Excel)
+        ];
         $maxSize = 5 * 1024 * 1024; // 5MB
         $uploadDir = __DIR__ . '/uploads/';
 
@@ -205,7 +214,7 @@ try {
         }
 
         if (!in_array($file['type'], $allowedTypes)) {
-            throw new Exception('Invalid file type: ' . $file['type'] . '. Only PDF, JPG, and PNG are allowed.');
+            throw new Exception('Invalid file type: ' . $file['type'] . '. Allowed types are PDF, JPG, PNG, PPT, PPTX, TXT, XLS, XLSX.');
         }
         if ($file['size'] > $maxSize) {
             throw new Exception('File size exceeds 5MB limit: ' . $file['size']);
