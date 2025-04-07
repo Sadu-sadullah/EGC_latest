@@ -56,18 +56,17 @@ try {
 
     // Handle form submission
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        // Ensure all form values are captured properly
+        // Capture form values
         $project_id = trim($_POST['project_id']);
         $task_name = trim($_POST['task_name']);
         $task_description = trim($_POST['task_description']);
-        $project_type = trim($_POST['project_type']);
         $planned_start_date = trim($_POST['planned_start_date']);
         $planned_finish_date = trim($_POST['planned_finish_date']);
         $user_id = trim($_POST['user_id']);
         $predecessor_task_id = isset($_POST['predecessor_task_id']) && !empty($_POST['predecessor_task_id']) ? trim($_POST['predecessor_task_id']) : null;
 
         // Validate inputs
-        if (empty($task_name) || empty($project_id) || empty($task_description) || empty($project_type) || empty($planned_start_date) || empty($planned_finish_date) || empty($user_id)) {
+        if (empty($task_name) || empty($project_id) || empty($task_description) || empty($planned_start_date) || empty($planned_finish_date) || empty($user_id)) {
             $error = "All fields are required.";
         } else {
             // Update the task in the database
@@ -77,7 +76,6 @@ try {
                     project_id = :project_id,
                     task_name = :task_name, 
                     task_description = :task_description, 
-                    project_type = :project_type, 
                     planned_start_date = :planned_start_date, 
                     planned_finish_date = :planned_finish_date,
                     user_id = :user_id,
@@ -87,7 +85,6 @@ try {
             $updateStmt->bindParam(':project_id', $project_id);
             $updateStmt->bindParam(':task_name', $task_name);
             $updateStmt->bindParam(':task_description', $task_description);
-            $updateStmt->bindParam(':project_type', $project_type);
             $updateStmt->bindParam(':planned_start_date', $planned_start_date);
             $updateStmt->bindParam(':planned_finish_date', $planned_finish_date);
             $updateStmt->bindParam(':user_id', $user_id);
@@ -100,7 +97,6 @@ try {
                 $task['project_id'] = $project_id;
                 $task['task_name'] = $task_name;
                 $task['task_description'] = $task_description;
-                $task['project_type'] = $project_type;
                 $task['planned_start_date'] = $planned_start_date;
                 $task['planned_finish_date'] = $planned_finish_date;
                 $task['user_id'] = $user_id;
@@ -257,13 +253,6 @@ try {
                 <textarea id="task_description" name="task_description" rows="4"><?= htmlspecialchars($task['task_description']) ?></textarea>
             </div>
             <div class="form-group">
-                <label for="project_type">Project Type:</label>
-                <select id="project_type" name="project_type">
-                    <option value="Internal" <?php if ($task['project_type'] == 'Internal') echo 'selected'; ?>>Internal</option>
-                    <option value="External" <?php if ($task['project_type'] == 'External') echo 'selected'; ?>>External</option>
-                </select>
-            </div>
-            <div class="form-group">
                 <label for="planned_start_date">Planned Start Date</label>
                 <input type="datetime-local" id="planned_start_date" name="planned_start_date" value="<?= htmlspecialchars(date('Y-m-d\TH:i', strtotime($task['planned_start_date']))) ?>" required>
             </div>
@@ -313,7 +302,7 @@ try {
             </div>
             <button type="submit">Save Changes</button>
         </form>
-        <a href="tasks.php" class="back-btn">Back</a>
+        <a href="task-actions.php" class="back-btn">Back</a>
     </div>
 </body>
 

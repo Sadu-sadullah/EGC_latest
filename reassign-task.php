@@ -44,47 +44,63 @@ if ($task_id === null || $reassign_user_id === null) {
     die(json_encode(['success' => false, 'message' => 'Invalid request. Task ID or Reassign User ID is missing.']));
 }
 
-// Fetch the current task details from the database
+// Start a transaction
+$pdo->beginTransaction();
+
 try {
-    $stmt = $pdo->prepare("SELECT assigned_by_id, status FROM tasks WHERE task_id = ?");
+    // Fetch the current task details from the database
+    $stmt = $pdo->prepare("SELECT assigned_by_id, status, task_name FROM tasks WHERE task_id = ?");
     $stmt->execute([$task_id]);
     $task = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$task) {
-        die(json_encode(['success' => false, 'message' => 'Task not found.']));
+        throw new Exception('Task not found.');
     }
 
-    $assigned_by_id = $task['assigned_by_id']; // The user who originally assigned the task
-    $current_status = $task['status']; // Current status of the task
+    $assigned_by_id = $task['assigned_by_id'];
+    $current_status = $task['status'];
+    $task_name = $task['task_name'];
 
     // Validate the reassignment based on the user's role and assigned_by_id
-    if ($user_role === 'Admin' || $assigned_by_id == $user_id) {
-        // Only Admin or the user who assigned the task can reassign it
-        // Ensure the task is in a state that allows reassignment
-        $allowed_statuses_for_reassignment = ['Assigned', 'In Progress', 'Hold', 'Reinstated', 'Reassigned'];
-        if (!in_array($current_status, $allowed_statuses_for_reassignment)) {
-            die(json_encode(['success' => false, 'message' => 'Task cannot be reassigned in its current status.']));
-        }
-    } else {
-        die(json_encode(['success' => false, 'message' => 'Unauthorized access. Only admins or the task assigner can reassign tasks.']));
+    if ($user_role !== 'Admin' && $assigned_by_id != $user_id) {
+        throw new Exception('Unauthorized access. Only admins or the task assigner can reassign tasks.');
     }
 
-    // Update the task's assigned user and set the status to "Assigned"
+    // Ensure the task is in a state that allows reassignment
+    $allowed_statuses_for_reassignment = ['Assigned', 'In Progress', 'Hold', 'Reinstated', 'Reassigned'];
+    if (!in_array($current_status, $allowed_statuses_for_reassignment)) {
+        throw new Exception('Task cannot be reassigned in its current status.');
+    }
+
+    // Update the task's assigned user and set the status to "Reassigned"
     $stmt = $pdo->prepare("UPDATE tasks SET user_id = ?, status = 'Reassigned' WHERE task_id = ?");
     $stmt->execute([$reassign_user_id, $task_id]);
 
-    // Fetch the task name for the response (optional)
-    $stmt = $pdo->prepare("SELECT task_name FROM tasks WHERE task_id = ?");
-    $stmt->execute([$task_id]);
-    $task_name = $stmt->fetchColumn();
+    // Fetch the new assignee's username
+    $userStmt = $pdo->prepare("SELECT username FROM users WHERE id = ?");
+    $userStmt->execute([$reassign_user_id]);
+    $newAssignee = $userStmt->fetch(PDO::FETCH_ASSOC);
+    $newAssigneeUsername = $newAssignee ? $newAssignee['username'] : 'Unknown';
+
+    // Log the reassignment in task_timeline
+    $details = json_encode(['reassigned_to_user_id' => $reassign_user_id, 'reassigned_to_username' => $newAssigneeUsername]);
+    $stmt = $pdo->prepare("INSERT INTO task_timeline (task_id, action, previous_status, new_status, changed_by_user_id, details) VALUES (?, 'task_reassigned', ?, 'Reassigned', ?, ?)");
+    $stmt->execute([$task_id, $current_status, $user_id, $details]);
+
+    // Commit the transaction
+    $pdo->commit();
 
     // Return a success response
     echo json_encode([
         'success' => true,
         'message' => 'Task reassigned successfully.',
-        'task_name' => $task_name ?? 'Task'
+        'task_name' => $task_name
     ]);
+} catch (Exception $e) {
+    $pdo->rollBack();
+    die(json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]));
 } catch (PDOException $e) {
+    $pdo->rollBack();
     die(json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]));
 }
 ?>

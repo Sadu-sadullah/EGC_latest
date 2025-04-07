@@ -444,11 +444,11 @@ foreach ($allTasks as &$task) {
 }
 
 $pendingStartedTasks = array_filter($allTasks, function ($task) {
-    return in_array($task['status'], ['Assigned', 'In Progress', 'Hold', 'Reassigned', 'Reinstated']);
+    return in_array($task['status'], ['Assigned', 'In Progress', 'Hold', 'Reassigned', 'Reinstated', 'Cancelled']);
 });
 
 $completedTasks = array_filter($allTasks, function ($task) {
-    return in_array($task['status'], ['Completed on Time', 'Delayed Completion', 'Closed', 'Cancelled']);
+    return in_array($task['status'], ['Completed on Time', 'Delayed Completion', 'Closed']);
 });
 
 // Check if any task is external
@@ -1279,7 +1279,8 @@ function getWeekdayHours($start, $end)
                                             $assignerStatuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
                                             $normalUserStatuses = [
                                                 'Assigned' => ['In Progress'],
-                                                'In Progress' => isset($row['available_statuses'][0]) ? [$row['available_statuses'][0]] : []
+                                                'In Progress' => isset($row['available_statuses'][0]) ? [$row['available_statuses'][0]] : [],
+                                                'Reassigned' => ['In Progress']
                                             ];
 
                                             if (hasPermission('status_change_main') || ($assigned_by_id == $user_id && !$isSelfAssigned)) {
@@ -1596,9 +1597,9 @@ function getWeekdayHours($start, $end)
                         <div class="mb-3">
                             <label for="attachment" class="form-label">Upload Proof (PDF, Image, etc.):</label>
                             <input type="file" class="form-control" id="attachment" name="attachment"
-                                accept=".pdf,.jpg,.jpeg,.png,.txt,.ppt,.pptx,.xls,.xlsx">
+                                accept=".pdf,.jpg,.jpeg,.png,.txt,.ppt,.pptx,.xls,.xlsx,.doc,.docx">
                             <small class="form-text text-muted">Max file size: 5MB. Allowed types: PDF, JPG,
-                                PNG, PPT, PPTX, TXT, XLS, XLSX.</small>
+                                PNG, PPT, PPTX, TXT, XLS, XLSX, DOC, DOCX.</small>
                         </div>
                     </div>
                     <div class="modal-footer">

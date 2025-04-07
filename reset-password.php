@@ -1,6 +1,6 @@
 <?php
 session_start();
-// Manually include PHPMailer files
+// Include PHPMailer files
 require './PHPMailer-master/src/Exception.php';
 require './PHPMailer-master/src/PHPMailer.php';
 require './PHPMailer-master/src/SMTP.php';
@@ -22,30 +22,21 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-// Determine user's timezone
-$userTimeZone = null;
-if (isset($_COOKIE['user_timezone'])) {
-    $userTimeZone = $_COOKIE['user_timezone'];
-    date_default_timezone_set($userTimeZone); // Set PHP to user's timezone
-} else {
-    // If no cookie, default to a common timezone or detect via JavaScript (handled later in HTML)
-    date_default_timezone_set('UTC'); // Default to UTC as fallback
-}
+// Set timezone
+date_default_timezone_set(isset($_COOKIE['user_timezone']) ? $_COOKIE['user_timezone'] : 'UTC');
 
 // Function to validate password complexity
-function validatePassword($password)
-{
-    $uppercase = preg_match('@[A-Z]@', $password);
-    $number = preg_match('@\d@', $password);
-    $specialChar = preg_match('@[^\w]@', $password);
-    return $uppercase && $number && $specialChar && strlen($password) >= 8;
+function validatePassword($password) {
+    return preg_match('@[A-Z]@', $password) && 
+           preg_match('@\d@', $password) && 
+           preg_match('@[^\w]@', $password) && 
+           strlen($password) >= 8;
 }
 
-// Handle reset request (no token in URL)
-if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_GET['token'])) {
+// Handle username submission for OTP
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['username']) && !isset($_POST['otp'])) {
     $username = trim($_POST['username']);
-
-    // Check if username exists
+    
     $stmt = $conn->prepare("SELECT email FROM users WHERE username = ?");
     $stmt->bind_param("s", $username);
     $stmt->execute();
@@ -55,20 +46,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_GET['token'])) {
         $user = $result->fetch_assoc();
         $email = $user['email'];
 
-        // Generate a unique reset token
-        $resetToken = bin2hex(random_bytes(32));
-        $expiry = date('Y-m-d H:i:s', strtotime('+1 hour')); // Use user's timezone for expiry
+        // Generate 6-digit OTP
+        $otp = sprintf("%06d", mt_rand(0, 999999));
+        $expiry = date('Y-m-d H:i:s', strtotime('+15 minutes'));
 
-        // Store token and expiry in database using user's local timezone
+        // Store OTP and expiry in database
         $updateStmt = $conn->prepare("UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE username = ?");
-        $updateStmt->bind_param("sss", $resetToken, $expiry, $username);
+        $updateStmt->bind_param("sss", $otp, $expiry, $username);
         $updateStmt->execute();
         $updateStmt->close();
 
-        // Send reset email with PHPMailer
+        // Send OTP via email
         $mail = new PHPMailer(true);
         try {
-            // Server settings (using Zoho SMTP)
             $mail->isSMTP();
             $mail->Host = 'smtp.zoho.com';
             $mail->SMTPAuth = true;
@@ -77,65 +67,83 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_GET['token'])) {
             $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
             $mail->Port = 587;
 
-            // Recipients
-            $mail->setFrom('enquiry@euroglobalconsultancy.com', 'Task Management System Password Reset');
+            $mail->setFrom('enquiry@euroglobalconsultancy.com', 'Task Management System');
             $mail->addAddress($email);
 
-            // Content
-            $resetLink = "http://euroglobalconsultancy.com/reset-password.php?token=" . $resetToken;
             $mail->isHTML(true);
-            $mail->Subject = 'Password Reset Request';
-            $mail->Body = "Hello,<br><br>Click the following link to reset your password:<br><a href='$resetLink'>$resetLink</a><br><br>This link will expire in 1 hour in your local time (" . date('T') . ").<br><br>If you didn’t request this, ignore this email.";
-            $mail->AltBody = "Hello,\n\nClick the following link to reset your password:\n$resetLink\n\nThis link will expire in 1 hour in your local time (" . date('T') . ").\n\nIf you didn’t request this, ignore this email.";
+            $mail->Subject = 'Your Password Reset OTP';
+            $mail->Body = "Hello,<br><br>Your One-Time Password (OTP) for password reset is: <strong>$otp</strong><br><br>This OTP will expire in 15 minutes (" . date('T') . ").<br><br>If you didn’t request this, please ignore this email.";
+            $mail->AltBody = "Hello,\n\nYour One-Time Password (OTP) for password reset is: $otp\n\nThis OTP will expire in 15 minutes (" . date('T') . ").\n\nIf you didn’t request this, please ignore this email.";
 
             $mail->send();
-            $successMsg = "A password reset link has been sent to your email.";
+            $_SESSION['reset_username'] = $username; // Store username for next step
+            $successMsg = "An OTP has been sent to your registered email. Please check your inbox (and spam/junk folder).";
+            $showOtpForm = true;
         } catch (Exception $e) {
-            $errorMsg = "Failed to send the reset email. Error: " . $mail->ErrorInfo;
+            $errorMsg = "Failed to send OTP. Please try again later.";
         }
     } else {
-        $errorMsg = "Username not found.";
+        $errorMsg = "No account found with that username.";
     }
     $stmt->close();
 }
 
-// Handle reset form submission (token in URL)
-elseif ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_GET['token'])) {
-    $token = $_GET['token'];
-    $newPassword = $_POST['new_password'];
-    $confirmPassword = $_POST['confirm_password'];
-
-    if ($newPassword !== $confirmPassword) {
-        $errorMsg = "New password and confirm password do not match.";
-    } elseif (!validatePassword($newPassword)) {
-        $errorMsg = "Password must contain at least one uppercase letter, one number, one special character, and be at least 8 characters long.";
+// Handle OTP verification and password reset
+elseif ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['otp'])) {
+    $otp = trim($_POST['otp']);
+    $username = $_SESSION['reset_username'] ?? '';
+    
+    if (empty($username)) {
+        $errorMsg = "Session expired. Please start the reset process again.";
     } else {
-        $stmt = $conn->prepare("SELECT username, password FROM users WHERE reset_token = ? AND reset_token_expiry > NOW()");
-        $stmt->bind_param("s", $token);
+        $stmt = $conn->prepare("SELECT email, password FROM users WHERE username = ? AND reset_token = ? AND reset_token_expiry > NOW()");
+        $stmt->bind_param("ss", $username, $otp);
         $stmt->execute();
         $result = $stmt->get_result();
 
         if ($result->num_rows > 0) {
             $user = $result->fetch_assoc();
-            $username = $user['username'];
-            $currentHashedPassword = $user['password'];
+            if (isset($_POST['new_password'])) {
+                // Password reset stage
+                $newPassword = trim($_POST['new_password']);
+                $confirmPassword = trim($_POST['confirm_password']);
 
-            if (password_verify($newPassword, $currentHashedPassword)) {
-                $errorMsg = "The new password cannot be the same as the current password.";
-            } else {
-                $newHashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
-                $updateStmt = $conn->prepare("UPDATE users SET password = ?, reset_token = NULL, reset_token_expiry = NULL WHERE username = ?");
-                $updateStmt->bind_param("ss", $newHashedPassword, $username);
-                if ($updateStmt->execute()) {
-                    header("Location: portal-login.html?reset=success");
-                    exit;
+                if ($newPassword !== $confirmPassword) {
+                    $errorMsg = "Passwords do not match.";
+                    $showOtpForm = true;
+                    $otpVerified = true;
+                } elseif (!validatePassword($newPassword)) {
+                    $errorMsg = "Password must be at least 8 characters long and include one uppercase letter, one number, and one special character.";
+                    $showOtpForm = true;
+                    $otpVerified = true;
+                } elseif (password_verify($newPassword, $user['password'])) {
+                    $errorMsg = "New password cannot be the same as your current password.";
+                    $showOtpForm = true;
+                    $otpVerified = true;
                 } else {
-                    $errorMsg = "Error updating password: " . $conn->error;
+                    $newHashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
+                    $updateStmt = $conn->prepare("UPDATE users SET password = ?, reset_token = NULL, reset_token_expiry = NULL WHERE username = ?");
+                    $updateStmt->bind_param("ss", $newHashedPassword, $username);
+                    if ($updateStmt->execute()) {
+                        unset($_SESSION['reset_username']);
+                        header("Location: portal-login.html?reset=success");
+                        exit;
+                    } else {
+                        $errorMsg = "Error updating password. Please try again.";
+                        $showOtpForm = true;
+                        $otpVerified = true;
+                    }
+                    $updateStmt->close();
                 }
-                $updateStmt->close();
+            } else {
+                // OTP verified, show password reset form
+                $successMsg = "OTP verified successfully. Please enter your new password.";
+                $showOtpForm = true;
+                $otpVerified = true;
             }
         } else {
-            $errorMsg = "Invalid or expired reset link.";
+            $errorMsg = "Invalid or expired OTP.";
+            $showOtpForm = true;
         }
         $stmt->close();
     }
@@ -173,6 +181,7 @@ $conn->close();
         h2 {
             text-align: center;
             color: #333;
+            margin-bottom: 20px;
         }
 
         form {
@@ -185,6 +194,8 @@ $conn->close();
             margin-bottom: 15px;
             padding: 10px;
             font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
         }
 
         button {
@@ -203,6 +214,7 @@ $conn->close();
 
         .message {
             text-align: center;
+            margin-bottom: 15px;
         }
 
         .error {
@@ -212,12 +224,31 @@ $conn->close();
         .success {
             color: #5cb85c;
         }
+
+        label {
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .back-link {
+            text-align: center;
+            margin-top: 15px;
+        }
+
+        .back-link a {
+            color: #002c5f;
+            text-decoration: none;
+        }
+
+        .back-link a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 
 <body>
     <div class="form-container">
-        <h2><?php echo isset($_GET['token']) ? 'Set New Password' : 'Reset Password'; ?></h2>
+        <h2>Reset Password</h2>
 
         <?php if (isset($errorMsg)): ?>
             <p class="message error"><?= htmlspecialchars($errorMsg) ?></p>
@@ -226,36 +257,48 @@ $conn->close();
             <p class="message success"><?= htmlspecialchars($successMsg) ?></p>
         <?php endif; ?>
 
-        <?php if (isset($_GET['token'])): ?>
-            <form action="reset-password.php?token=<?= htmlspecialchars($_GET['token']) ?>" method="post">
-                <input type="password" name="new_password" placeholder="Enter new password" required>
-                <input type="password" name="confirm_password" placeholder="Confirm new password" required>
-                <button type="submit">Reset Password</button>
-            </form>
+        <?php if (isset($showOtpForm) && $showOtpForm): ?>
+            <?php if (isset($otpVerified) && $otpVerified): ?>
+                <form method="post">
+                    <label for="new_password">New Password</label>
+                    <input type="password" id="new_password" name="new_password" placeholder="Enter new password" required>
+                    <label for="confirm_password">Confirm Password</label>
+                    <input type="password" id="confirm_password" name="confirm_password" placeholder="Confirm new password" required>
+                    <input type="hidden" name="otp" value="<?= htmlspecialchars($otp ?? '') ?>">
+                    <button type="submit">Reset Password</button>
+                </form>
+            <?php else: ?>
+                <form method="post">
+                    <label for="otp">Enter OTP</label>
+                    <input type="text" id="otp" name="otp" placeholder="Enter 6-digit OTP" required maxlength="6" pattern="\d{6}">
+                    <button type="submit">Verify OTP</button>
+                </form>
+            <?php endif; ?>
         <?php else: ?>
-            <form action="reset-password.php" method="post">
-                <input type="text" name="username" placeholder="Enter your username" required>
-                <button type="submit">Request Password Reset</button>
+            <form method="post">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" placeholder="Enter your username" required>
+                <button type="submit">Request OTP</button>
             </form>
         <?php endif; ?>
 
-        <!-- JavaScript to set timezone cookie if not already set -->
-        <script>
-            document.addEventListener('DOMContentLoaded', function () {
-                function setUserTimezone() {
-                    const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-                    if (!document.cookie.match(/user_timezone=([^;]+)/)) {
-                        // Set cookie if not already set, expires in 30 days
-                        document.cookie = `user_timezone=${encodeURIComponent(userTimeZone)}; path=/; max-age=2592000`;
-                    }
-                    console.log('User Timezone:', userTimeZone);
-                    console.log('Cookie Timezone:', document.cookie.match(/user_timezone=([^;]+)/)?.[1] || 'Not set');
-                }
-
-                setUserTimezone();
-            });
-        </script>
+        <div class="back-link">
+            <a href="portal-login.html">Back to Login</a>
+        </div>
     </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            function setUserTimezone() {
+                const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                if (!document.cookie.match(/user_timezone=([^;]+)/)) {
+                    document.cookie = `user_timezone=${encodeURIComponent(userTimeZone)}; path=/; max-age=2592000`;
+                    window.location.reload();
+                }
+            }
+            setUserTimezone();
+        });
+    </script>
 </body>
 
 </html>
