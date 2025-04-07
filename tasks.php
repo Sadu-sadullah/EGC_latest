@@ -280,6 +280,7 @@ if (hasPermission('view_all_tasks')) {
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
+            tasks.start_description,  -- Added here
             assigned_to_user.username AS assigned_to, 
             GROUP_CONCAT(DISTINCT assigned_to_department.name SEPARATOR ', ') AS assigned_to_department, 
             assigned_by_user.username AS assigned_by,
@@ -329,6 +330,7 @@ if (hasPermission('view_all_tasks')) {
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
+            tasks.start_description,  -- Added here
             assigned_to_user.username AS assigned_to, 
             GROUP_CONCAT(DISTINCT assigned_to_department.name SEPARATOR ', ') AS assigned_to_department, 
             assigned_by_user.username AS assigned_by,
@@ -379,6 +381,7 @@ if (hasPermission('view_all_tasks')) {
             task_transactions.delayed_reason,
             task_transactions.actual_finish_date AS transaction_actual_finish_date,
             tasks.completion_description,
+            tasks.start_description,  -- Added here
             assigned_by_user.username AS assigned_by,
             GROUP_CONCAT(DISTINCT assigned_by_department.name SEPARATOR ', ') AS assigned_by_department,
             predecessor_task.task_name AS predecessor_task_name
@@ -1239,9 +1242,14 @@ function getWeekdayHours($start, $end)
                                     <td><?= $taskCountStart++ ?></td>
                                     <td><?= htmlspecialchars($row['project_name']) ?></td>
                                     <td>
-                                        <?php if ($row['status'] === 'Completed on Time'): ?>
-                                            <a href="#" data-bs-toggle="modal" data-bs-target="#viewDescriptionModal"
-                                                data-description="<?= htmlspecialchars($row['completion_description']) ?>"><?= htmlspecialchars($row['task_name']) ?></a>
+                                        <?php if (in_array($row['status'], ['In Progress', 'Completed on Time', 'Delayed Completion'])): ?>
+                                            <a href="#" data-bs-toggle="modal" data-bs-target="#viewTaskDetailsModal"
+                                                data-task-status="<?= htmlspecialchars($row['status']) ?>"
+                                                data-start-description="<?= htmlspecialchars($row['start_description'] ?? '') ?>"
+                                                data-completion-description="<?= htmlspecialchars($row['completion_description'] ?? '') ?>"
+                                                data-delayed-reason="<?= htmlspecialchars($row['delayed_reason'] ?? '') ?>">
+                                                <?= htmlspecialchars($row['task_name']) ?>
+                                            </a>
                                         <?php else: ?>
                                             <?= htmlspecialchars($row['task_name']) ?>
                                         <?php endif; ?>
@@ -1423,12 +1431,14 @@ function getWeekdayHours($start, $end)
                                     <td><?= $taskCountStart++ ?></td>
                                     <td><?= htmlspecialchars($row['project_name']) ?></td>
                                     <td>
-                                        <?php if ($row['status'] === 'Completed on Time' || $isClosedFromCompletedOnTime): ?>
-                                            <a href="#" data-bs-toggle="modal" data-bs-target="#viewDescriptionModal"
-                                                data-description="<?= htmlspecialchars($row['completion_description']) ?>"><?= htmlspecialchars($row['task_name']) ?></a>
-                                        <?php elseif ($row['status'] === 'Delayed Completion' || $isClosedFromDelayedCompletion): ?>
-                                            <a href="#" data-bs-toggle="modal" data-bs-target="#delayedCompletionModal"
-                                                onclick="showDelayedDetails('<?= htmlspecialchars($row['task_name'] ?? '') ?>', '<?= htmlspecialchars($row['task_actual_finish_date'] ?? '') ?>', '<?= htmlspecialchars($row['delayed_reason'] ?? '') ?>', '<?= htmlspecialchars($row['completion_description'] ?? '') ?>')"><?= htmlspecialchars($row['task_name'] ?? '') ?></a>
+                                        <?php if (in_array($row['status'], ['In Progress', 'Completed on Time', 'Delayed Completion'])): ?>
+                                            <a href="#" data-bs-toggle="modal" data-bs-target="#viewTaskDetailsModal"
+                                                data-task-status="<?= htmlspecialchars($row['status']) ?>"
+                                                data-start-description="<?= htmlspecialchars($row['start_description'] ?? '') ?>"
+                                                data-completion-description="<?= htmlspecialchars($row['completion_description'] ?? '') ?>"
+                                                data-delayed-reason="<?= htmlspecialchars($row['delayed_reason'] ?? '') ?>">
+                                                <?= htmlspecialchars($row['task_name']) ?>
+                                            </a>
                                         <?php else: ?>
                                             <?= htmlspecialchars($row['task_name']) ?>
                                         <?php endif; ?>
@@ -1611,24 +1621,6 @@ function getWeekdayHours($start, $end)
         </div>
     </div>
 
-    <div class="modal fade" id="viewDescriptionModal" tabindex="-1" aria-labelledby="viewDescriptionModalLabel"
-        aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="viewDescriptionModalLabel">Task Completion Description</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <p id="completion-description-text">No description provided.</p>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <div class="modal fade" id="delayedCompletionModal" tabindex="-1" aria-labelledby="delayedCompletionModalLabel"
         aria-hidden="true">
         <div class="modal-dialog">
@@ -1763,19 +1755,42 @@ function getWeekdayHours($start, $end)
         </div>
     </div>
 
+    <div class="modal fade" id="viewTaskDetailsModal" tabindex="-1" aria-labelledby="viewTaskDetailsModalLabel"
+        aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="viewTaskDetailsModalLabel">Task Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="start-description-section">
+                        <p><strong>What was started:</strong></p>
+                        <p id="start-description-text">No start description provided.</p>
+                    </div>
+                    <div id="completion-description-section" style="display: none;">
+                        <p><strong>Completion Description:</strong></p>
+                        <p id="completion-description-text">No completion description provided.</p>
+                    </div>
+                    <div id="delayed-reason-section" style="display: none;">
+                        <p><strong>Reason for Delay:</strong></p>
+                        <p id="delayed-reason-text">No delay reason provided.</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
         integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
         crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
     <script>
-        // Task Status Management
-        const viewDescriptionModal = document.getElementById('viewDescriptionModal');
-        viewDescriptionModal.addEventListener('show.bs.modal', function (event) {
-            const button = event.relatedTarget;
-            const description = button.getAttribute('data-description');
-            document.getElementById('completion-description-text').textContent = description || "No description provided.";
-        });
+
 
         function handleStatusChange(event, taskId) {
             event.preventDefault();
@@ -1825,6 +1840,80 @@ function getWeekdayHours($start, $end)
                         }
                     });
             }
+        }
+
+        const viewTaskDetailsModal = document.getElementById('viewTaskDetailsModal');
+        if (!viewTaskDetailsModal) {
+            console.error('Modal element #viewTaskDetailsModal not found in DOM');
+        } else {
+            viewTaskDetailsModal.addEventListener('show.bs.modal', function (event) {
+                console.log('Modal show event triggered');
+                const button = event.relatedTarget;
+                const taskStatus = button.getAttribute('data-task-status');
+                const startDescription = button.getAttribute('data-start-description') || 'No start description provided.';
+                const completionDescription = button.getAttribute('data-completion-description') || 'No completion description provided.';
+                const delayedReason = button.getAttribute('data-delayed-reason') || 'No delay reason provided.';
+
+                console.log('Task Status:', taskStatus);
+                console.log('Start Description:', startDescription);
+                console.log('Completion Description:', completionDescription);
+                console.log('Delayed Reason:', delayedReason);
+
+                // Get DOM elements
+                const startSection = document.getElementById('start-description-section');
+                const completionSection = document.getElementById('completion-description-section');
+                const delayedSection = document.getElementById('delayed-reason-section');
+                const startText = document.getElementById('start-description-text');
+                const completionText = document.getElementById('completion-description-text');
+                const delayedText = document.getElementById('delayed-reason-text');
+
+                // Verify elements exist
+                if (!startText) console.error('start-description-text not found');
+                if (!completionText) console.error('completion-description-text not found');
+                if (!delayedText) console.error('delayed-reason-text not found');
+
+                // Update content only if elements exist
+                if (startText) startText.textContent = startDescription;
+                if (completionText) completionText.textContent = completionDescription;
+                if (delayedText) delayedText.textContent = delayedReason;
+
+                // Reset visibility
+                startSection.style.display = 'none';
+                completionSection.style.display = 'none';
+                delayedSection.style.display = 'none';
+
+                // Set visibility based on status
+                if (taskStatus === 'In Progress') {
+                    startSection.style.display = 'block';
+                } else if (taskStatus === 'Completed on Time') {
+                    startSection.style.display = 'block';
+                    completionSection.style.display = 'block';
+                } else if (taskStatus === 'Delayed Completion') {
+                    startSection.style.display = 'block';
+                    completionSection.style.display = 'block';
+                    delayedSection.style.display = 'block';
+                } else {
+                    console.warn('Unhandled task status:', taskStatus);
+                }
+
+                // Debug: Log final text content
+                console.log('Start Text Content:', startText ? startText.textContent : 'Element not found');
+                console.log('Completion Text Content:', completionText ? completionText.textContent : 'Element not found');
+                console.log('Delayed Text Content:', delayedText ? delayedText.textContent : 'Element not found');
+            });
+
+            // Ensure content persists after modal is fully shown
+            viewTaskDetailsModal.addEventListener('shown.bs.modal', function () {
+                const completionText = document.getElementById('completion-description-text');
+                if (completionText && completionText.textContent === 'No completion description provided.') {
+                    console.warn('Completion description reset detected, reapplying');
+                    const button = document.querySelector('.modal.show [data-bs-toggle="modal"]') || document.querySelector('a[data-bs-target="#viewTaskDetailsModal"]:focus');
+                    if (button) {
+                        const completionDescription = button.getAttribute('data-completion-description') || 'No completion description provided.';
+                        completionText.textContent = completionDescription;
+                    }
+                }
+            });
         }
 
         function fetchTaskDetailsForClosure(taskId) {
@@ -1909,13 +1998,6 @@ function getWeekdayHours($start, $end)
                     console.error('Error:', error);
                     alert('An error occurred while reassigning the task.');
                 });
-        }
-
-        function showDelayedDetails(taskName, completionDate, delayReason, completionDescription) {
-            document.getElementById('delayed-task-name').innerText = taskName || "N/A";
-            document.getElementById('delayed-completion-date').innerText = completionDate || "N/A";
-            document.getElementById('delay-reason').innerText = delayReason || "N/A";
-            document.getElementById('completion-description-delayed').innerText = completionDescription && completionDescription.trim() ? completionDescription : "No description provided.";
         }
 
         function handleCompletionForm(event) {

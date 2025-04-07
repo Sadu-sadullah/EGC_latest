@@ -204,8 +204,8 @@ try {
             'text/plain',                                                  // Plain text
             'application/vnd.ms-excel',                                    // Excel (.xls)
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // Excel (.xlsx)
-            'application/msword',                                          // Word (.doc) - Added
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // Word (.docx) - Added
+            'application/msword',                                          // Word (.doc)
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // Word (.docx)
         ];
         $maxSize = 5 * 1024 * 1024; // 5MB
         $uploadDir = __DIR__ . '/uploads/';
@@ -218,7 +218,7 @@ try {
         }
 
         if (!in_array($file['type'], $allowedTypes)) {
-            throw new Exception('Invalid file type: ' . $file['type'] . '. Allowed types are PDF, JPG, PNG, PPT, PPTX, TXT, XLS, XLSX.');
+            throw new Exception('Invalid file type: ' . $file['type'] . '. Allowed types are PDF, JPG, PNG, PPT, PPTX, TXT, XLS, XLSX, DOC, DOCX.');
         }
         if ($file['size'] > $maxSize) {
             throw new Exception('File size exceeds 5MB limit: ' . $file['size']);
@@ -261,9 +261,10 @@ try {
     } elseif ($new_status === $current_status) {
         // No status change
     } elseif ($new_status === 'In Progress') {
-        $sql = "UPDATE tasks SET status = ?, actual_start_date = COALESCE(actual_start_date, ?) WHERE task_id = ?";
+        $start_description = $_POST['completion_description'] ?? null; // Use the same form field for "What was started?"
+        $sql = "UPDATE tasks SET status = ?, actual_start_date = COALESCE(actual_start_date, ?), start_description = ? WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$new_status, $actualStartDate, $task_id]);
+        $stmt->execute([$new_status, $actualStartDate, $start_description, $task_id]);
     } elseif ($new_status === 'Completed on Time' || $new_status === 'Delayed Completion') {
         $sql = "UPDATE tasks SET status = ?, completion_description = ?, actual_finish_date = ? WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);

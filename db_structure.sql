@@ -1,11 +1,11 @@
 -- phpMyAdmin SQL Dump
--- version 5.2.2
+-- version 5.2.1
 -- https://www.phpmyadmin.net/
 --
--- Host: localhost:3306
--- Generation Time: Apr 02, 2025 at 11:48 AM
--- Server version: 8.0.41
--- PHP Version: 8.3.19
+-- Host: 127.0.0.1
+-- Generation Time: Apr 07, 2025 at 12:34 PM
+-- Server version: 10.4.32-MariaDB
+-- PHP Version: 8.2.12
 
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 START TRANSACTION;
@@ -18,7 +18,7 @@ SET time_zone = "+00:00";
 /*!40101 SET NAMES utf8mb4 */;
 
 --
--- Database: `euro_login_system`
+-- Database: `new`
 --
 
 -- --------------------------------------------------------
@@ -28,8 +28,8 @@ SET time_zone = "+00:00";
 --
 
 CREATE TABLE `departments` (
-  `id` int NOT NULL,
-  `name` varchar(100) COLLATE utf8mb4_general_ci NOT NULL
+  `id` int(11) NOT NULL,
+  `name` varchar(100) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -39,8 +39,8 @@ CREATE TABLE `departments` (
 --
 
 CREATE TABLE `modules` (
-  `id` int NOT NULL,
-  `name` varchar(50) COLLATE utf8mb4_general_ci NOT NULL
+  `id` int(11) NOT NULL,
+  `name` varchar(50) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -50,9 +50,9 @@ CREATE TABLE `modules` (
 --
 
 CREATE TABLE `permissions` (
-  `id` int NOT NULL,
-  `name` varchar(50) COLLATE utf8mb4_general_ci NOT NULL,
-  `module_id` int NOT NULL
+  `id` int(11) NOT NULL,
+  `name` varchar(50) NOT NULL,
+  `module_id` int(11) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -62,16 +62,16 @@ CREATE TABLE `permissions` (
 --
 
 CREATE TABLE `projects` (
-  `id` int NOT NULL,
-  `project_name` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
-  `created_by_user_id` int NOT NULL,
-  `created_timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `project_type` enum('Internal','External') COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'Internal',
-  `customer_name` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
-  `customer_email` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
-  `customer_mobile` varchar(20) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `id` int(11) NOT NULL,
+  `project_name` varchar(255) NOT NULL,
+  `created_by_user_id` int(11) NOT NULL,
+  `created_timestamp` timestamp NOT NULL DEFAULT current_timestamp(),
+  `project_type` enum('Internal','External') NOT NULL DEFAULT 'Internal',
+  `customer_name` varchar(255) DEFAULT NULL,
+  `customer_email` varchar(255) DEFAULT NULL,
+  `customer_mobile` varchar(20) DEFAULT NULL,
   `cost` decimal(15,2) DEFAULT NULL,
-  `project_manager` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL
+  `project_manager` varchar(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -81,8 +81,8 @@ CREATE TABLE `projects` (
 --
 
 CREATE TABLE `roles` (
-  `id` int NOT NULL,
-  `name` varchar(50) COLLATE utf8mb4_general_ci NOT NULL
+  `id` int(11) NOT NULL,
+  `name` varchar(50) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -92,9 +92,9 @@ CREATE TABLE `roles` (
 --
 
 CREATE TABLE `role_permissions` (
-  `role_id` int NOT NULL,
-  `permission_id` int NOT NULL,
-  `module_id` int DEFAULT NULL
+  `role_id` int(11) NOT NULL,
+  `permission_id` int(11) NOT NULL,
+  `module_id` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -104,21 +104,22 @@ CREATE TABLE `role_permissions` (
 --
 
 CREATE TABLE `tasks` (
-  `task_id` int NOT NULL,
-  `user_id` int NOT NULL,
-  `task_name` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+  `task_id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `task_name` varchar(255) NOT NULL,
   `planned_start_date` datetime NOT NULL,
   `planned_finish_date` datetime NOT NULL,
   `actual_start_date` datetime DEFAULT NULL,
   `actual_finish_date` datetime DEFAULT NULL,
-  `recorded_timestamp` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  `task_description` text COLLATE utf8mb4_general_ci NOT NULL,
-  `completion_description` text COLLATE utf8mb4_general_ci,
-  `assigned_by_id` int NOT NULL,
-  `status` enum('Assigned','In Progress','Hold','Cancelled','Reinstated','Reassigned','Completed on Time','Delayed Completion','Closed') COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'Assigned',
-  `previous_status` varchar(50) COLLATE utf8mb4_general_ci DEFAULT NULL,
-  `predecessor_task_id` int DEFAULT NULL,
-  `project_id` int DEFAULT NULL
+  `recorded_timestamp` timestamp NULL DEFAULT current_timestamp(),
+  `task_description` text NOT NULL,
+  `start_description` text DEFAULT NULL,
+  `completion_description` text DEFAULT NULL,
+  `assigned_by_id` int(11) NOT NULL,
+  `status` enum('Assigned','In Progress','Hold','Cancelled','Reinstated','Reassigned','Completed on Time','Delayed Completion','Closed') NOT NULL DEFAULT 'Assigned',
+  `previous_status` varchar(50) DEFAULT NULL,
+  `predecessor_task_id` int(11) DEFAULT NULL,
+  `project_id` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -128,14 +129,14 @@ CREATE TABLE `tasks` (
 --
 
 CREATE TABLE `task_attachments` (
-  `id` int NOT NULL,
-  `task_id` int NOT NULL,
+  `id` int(11) NOT NULL,
+  `task_id` int(11) NOT NULL,
   `filename` varchar(255) NOT NULL,
   `filepath` varchar(255) NOT NULL,
   `uploaded_at` datetime NOT NULL,
   `status_at_upload` varchar(50) NOT NULL,
-  `uploaded_by_user_id` int NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+  `uploaded_by_user_id` int(11) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 
@@ -144,10 +145,10 @@ CREATE TABLE `task_attachments` (
 --
 
 CREATE TABLE `task_deletion_reasons` (
-  `id` int NOT NULL,
-  `user_id` int DEFAULT NULL,
-  `reason` text COLLATE utf8mb4_general_ci,
-  `task_name` varchar(255) COLLATE utf8mb4_general_ci NOT NULL
+  `id` int(11) NOT NULL,
+  `user_id` int(11) DEFAULT NULL,
+  `reason` text DEFAULT NULL,
+  `task_name` varchar(255) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -157,13 +158,14 @@ CREATE TABLE `task_deletion_reasons` (
 --
 
 CREATE TABLE `task_timeline` (
-  `timeline_id` int NOT NULL,
-  `task_id` int NOT NULL,
-  `action` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
-  `previous_status` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL,
-  `new_status` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL,
-  `changed_by_user_id` int NOT NULL,
-  `changed_timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+  `timeline_id` int(11) NOT NULL,
+  `task_id` int(11) NOT NULL,
+  `action` varchar(255) NOT NULL,
+  `previous_status` varchar(255) DEFAULT NULL,
+  `new_status` varchar(255) DEFAULT NULL,
+  `changed_by_user_id` int(11) NOT NULL,
+  `changed_timestamp` timestamp NOT NULL DEFAULT current_timestamp(),
+  `details` text DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -173,12 +175,12 @@ CREATE TABLE `task_timeline` (
 --
 
 CREATE TABLE `task_transactions` (
-  `transaction_id` int NOT NULL,
-  `task_id` int NOT NULL,
+  `transaction_id` int(11) NOT NULL,
+  `task_id` int(11) NOT NULL,
   `actual_finish_date` datetime DEFAULT NULL,
-  `delayed_reason` text COLLATE utf8mb4_general_ci,
-  `changed_by_user_id` int DEFAULT NULL,
-  `changed_timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+  `delayed_reason` text DEFAULT NULL,
+  `changed_by_user_id` int(11) DEFAULT NULL,
+  `changed_timestamp` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -188,12 +190,14 @@ CREATE TABLE `task_transactions` (
 --
 
 CREATE TABLE `users` (
-  `id` int NOT NULL,
-  `username` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
-  `password` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
-  `email` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
-  `role_id` int DEFAULT NULL,
-  `session_token` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL
+  `id` int(11) NOT NULL,
+  `username` varchar(255) NOT NULL,
+  `password` varchar(255) NOT NULL,
+  `email` varchar(255) NOT NULL,
+  `role_id` int(11) DEFAULT NULL,
+  `session_token` varchar(255) DEFAULT NULL,
+  `reset_token` varchar(6) DEFAULT NULL,
+  `reset_token_expiry` timestamp NULL DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -203,8 +207,8 @@ CREATE TABLE `users` (
 --
 
 CREATE TABLE `user_departments` (
-  `user_id` int NOT NULL,
-  `department_id` int NOT NULL
+  `user_id` int(11) NOT NULL,
+  `department_id` int(11) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -316,67 +320,67 @@ ALTER TABLE `user_departments`
 -- AUTO_INCREMENT for table `departments`
 --
 ALTER TABLE `departments`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `modules`
 --
 ALTER TABLE `modules`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `permissions`
 --
 ALTER TABLE `permissions`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `projects`
 --
 ALTER TABLE `projects`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `roles`
 --
 ALTER TABLE `roles`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `tasks`
 --
 ALTER TABLE `tasks`
-  MODIFY `task_id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `task_id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `task_attachments`
 --
 ALTER TABLE `task_attachments`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `task_deletion_reasons`
 --
 ALTER TABLE `task_deletion_reasons`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `task_timeline`
 --
 ALTER TABLE `task_timeline`
-  MODIFY `timeline_id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `timeline_id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `task_transactions`
 --
 ALTER TABLE `task_transactions`
-  MODIFY `transaction_id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `transaction_id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `users`
 --
 ALTER TABLE `users`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- Constraints for dumped tables
