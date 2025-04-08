@@ -1800,46 +1800,69 @@ function getWeekdayHours($start, $end)
             const predecessorTaskId = row.data('predecessor-task-id') || null;
             let predecessorTaskName = row.find('td:eq(13)').text().trim();
 
-            if (status === 'Reassigned') {
-                document.getElementById('reassign-task-id').value = taskId;
-                new bootstrap.Modal(document.getElementById('reassignmentModal')).show();
-            } else if (status === 'In Progress' || status === 'Delayed Completion' || status === 'Completed on Time') {
-                document.getElementById('task-id').value = taskId;
-                document.getElementById('modal-status').value = status;
-                document.getElementById('predecessor-task-id').value = predecessorTaskId;
-                if (predecessorTaskId && (!predecessorTaskName || predecessorTaskName === 'N/A')) {
-                    fetch(`fetch-predecessor-task-name.php?task_id=${predecessorTaskId}`)
-                        .then(response => response.json())
-                        .then(data => {
-                            predecessorTaskName = data.task_name || 'N/A';
-                            document.getElementById('predecessor-task-name').innerText = predecessorTaskName;
-                            showPredecessorSection(predecessorTaskId, predecessorTaskName);
-                        });
-                } else {
-                    document.getElementById('predecessor-task-name').innerText = predecessorTaskName;
-                    showPredecessorSection(predecessorTaskId, predecessorTaskName);
-                }
-                const delayedReasonContainer = document.getElementById('delayed-reason-container');
-                const descriptionLabel = document.querySelector('#description-container .form-label');
-                delayedReasonContainer.style.display = (status === 'Delayed Completion') ? 'block' : 'none';
-                descriptionLabel.textContent = (status === 'In Progress') ? 'What was started?' : 'What was completed?';
-                new bootstrap.Modal(document.getElementById('completionModal')).show();
-            } else if (status === 'Closed') {
-                fetchTaskDetailsForClosure(taskId);
-            } else {
-                fetch('update-status.php', { method: 'POST', body: new FormData(form) })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            document.getElementById('success-task-name').innerText = data.task_name;
-                            document.getElementById('success-message').innerText = data.message;
-                            new bootstrap.Modal(document.getElementById('successModal')).show();
-                            setTimeout(() => window.location.reload(), 2000);
-                        } else {
-                            alert(data.message);
+            // Fetch task details to check planned start date
+            fetch(`fetch-task-details.php?task_id=${taskId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const plannedStartDate = new Date(data.planned_start_date); // Already formatted as "d M Y, h:i A"
+                        const currentDate = new Date();
+
+                        if (status === 'In Progress' && currentDate < plannedStartDate) {
+                            alert(`Cannot set status to "In Progress" before the planned start date (${data.planned_start_date}).`);
+                            // Revert to the original status
+                            event.target.value = form.querySelector('select[name="status"] option[selected]').value || data.current_status;
+                            return;
                         }
-                    });
-            }
+
+                        if (status === 'Reassigned') {
+                            document.getElementById('reassign-task-id').value = taskId;
+                            new bootstrap.Modal(document.getElementById('reassignmentModal')).show();
+                        } else if (status === 'In Progress' || status === 'Delayed Completion' || status === 'Completed on Time') {
+                            document.getElementById('task-id').value = taskId;
+                            document.getElementById('modal-status').value = status;
+                            document.getElementById('predecessor-task-id').value = predecessorTaskId;
+                            if (predecessorTaskId && (!predecessorTaskName || predecessorTaskName === 'N/A')) {
+                                fetch(`fetch-predecessor-task-name.php?task_id=${predecessorTaskId}`)
+                                    .then(response => response.json())
+                                    .then(data => {
+                                        predecessorTaskName = data.task_name || 'N/A';
+                                        document.getElementById('predecessor-task-name').innerText = predecessorTaskName;
+                                        showPredecessorSection(predecessorTaskId, predecessorTaskName);
+                                    });
+                            } else {
+                                document.getElementById('predecessor-task-name').innerText = predecessorTaskName;
+                                showPredecessorSection(predecessorTaskId, predecessorTaskName);
+                            }
+                            const delayedReasonContainer = document.getElementById('delayed-reason-container');
+                            const descriptionLabel = document.querySelector('#description-container .form-label');
+                            delayedReasonContainer.style.display = (status === 'Delayed Completion') ? 'block' : 'none';
+                            descriptionLabel.textContent = (status === 'In Progress') ? 'What was started?' : 'What was completed?';
+                            new bootstrap.Modal(document.getElementById('completionModal')).show();
+                        } else if (status === 'Closed') {
+                            fetchTaskDetailsForClosure(taskId);
+                        } else {
+                            fetch('update-status.php', { method: 'POST', body: new FormData(form) })
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        document.getElementById('success-task-name').innerText = data.task_name;
+                                        document.getElementById('success-message').innerText = data.message;
+                                        new bootstrap.Modal(document.getElementById('successModal')).show();
+                                        setTimeout(() => window.location.reload(), 2000);
+                                    } else {
+                                        alert(data.message);
+                                    }
+                                });
+                        }
+                    } else {
+                        alert('Error fetching task details: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching task details:', error);
+                    alert('An error occurred while checking the task details.');
+                });
         }
 
         const viewTaskDetailsModal = document.getElementById('viewTaskDetailsModal');
