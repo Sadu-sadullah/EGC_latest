@@ -57,6 +57,35 @@ function calculateActualDuration($start, $end)
     return (strtotime($end) - strtotime($start)) / 3600;
 }
 
+function getWeekdayHours($start, $end)
+{
+    if ($start >= $end) {
+        return 0;
+    }
+
+    $weekdayHours = 0;
+    $current = $start;
+
+    while ($current < $end) {
+        $dayOfWeek = date('N', $current);
+        if ($dayOfWeek <= 5) {
+            $startOfDay = strtotime('today', $current);
+            $endOfDay = strtotime('tomorrow', $current) - 1;
+
+            $dayStart = max($start, $startOfDay);
+            $dayEnd = min($end, $endOfDay);
+
+            $hours = ($dayEnd - $dayStart) / 3600;
+            if ($hours > 0) {
+                $weekdayHours += $hours;
+            }
+        }
+        $current = strtotime('+1 day', $current);
+    }
+
+    return $weekdayHours;
+}
+
 try {
     $user_id = $_SESSION['user_id'] ?? null;
     $task_id = $_POST['task_id'] ?? null;
@@ -65,6 +94,7 @@ try {
     $delayed_reason = $_POST['delayed_reason'] ?? null;
     $verified_status = $_POST['verified_status'] ?? null;
     $actual_finish_date = $_POST['actual_finish_date'] ?? $currentTime;
+    $reassign_user_id = $_POST['reassign_user_id'] ?? null;
 
     if (!$task_id || !$new_status) {
         throw new Exception('Invalid request parameters.');
@@ -85,39 +115,8 @@ try {
     $predecessor_task_id = $task['predecessor_task_id'];
     $actual_start_date = $task['actual_start_date'];
 
-    function getWeekdayHours($start, $end)
-    {
-        if ($start >= $end) {
-            return 0; // Invalid range
-        }
-
-        $weekdayHours = 0;
-        $current = $start;
-
-        while ($current < $end) {
-            $dayOfWeek = date('N', $current);
-            if ($dayOfWeek <= 5) { // Monday to Friday
-                $startOfDay = strtotime('today', $current);
-                $endOfDay = strtotime('tomorrow', $current) - 1;
-
-                // Determine the start and end times for this day
-                $dayStart = max($start, $startOfDay);
-                $dayEnd = min($end, $endOfDay);
-
-                // Calculate hours for this day
-                $hours = ($dayEnd - $dayStart) / 3600;
-                if ($hours > 0) {
-                    $weekdayHours += $hours;
-                }
-            }
-            $current = strtotime('+1 day', $current);
-        }
-
-        return $weekdayHours;
-    }
-
     $assignerStatuses = ['Assigned', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned'];
-    $normalUserStatuses = ['Assigned' => ['In Progress'], 'In Progress' => ['Completed on Time', 'Delayed Completion']];
+    $normalUserStatuses = ['Assigned' => ['In Progress'], 'In Progress' => ['Completed on Time', 'Delayed Completion'], 'Reassigned' => ['In Progress']];
     $allowedStatuses = array_merge($assignerStatuses, ['Reassigned', 'In Progress', 'Completed on Time', 'Delayed Completion', 'Closed']);
     $isSelfAssigned = ($assigned_by_id == $user_id && $assigned_user_id == $user_id);
 
@@ -145,6 +144,12 @@ try {
         }
     }
 
+    // Custom check for Reassigned to In Progress transition
+    if ($current_status === 'Reassigned' && $new_status === 'In Progress' && $new_status !== $current_status) {
+        throw new Exception('The task has just been reassigned. It has to be changed back to Assigned in order to start the task.');
+    }
+
+    // General status validation
     if ($new_status !== $current_status && !in_array($new_status, $statuses)) {
         throw new Exception('Invalid status change.');
     }
@@ -169,10 +174,9 @@ try {
         if (!$completion_description) {
             throw new Exception('Completion description is required for completed statuses.');
         }
-        // Use actual_start_date from database and current time for finish date
         $actualStartDate = strtotime($actual_start_date);
-        $actualFinishDate = time(); // Current time, matching tasks.php logic for in-progress/completing tasks
-        $actualDurationHours = getWeekdayHours($actualStartDate, $actualFinishDate); // Use the same function as tasks.php
+        $actualFinishDate = time();
+        $actualDurationHours = getWeekdayHours($actualStartDate, $actualFinishDate);
         $forceProceed = isset($_POST['force_proceed']) && $_POST['force_proceed'] === 'true';
         if ($actualDurationHours < 1 && !$forceProceed) {
             ob_end_clean();
@@ -184,24 +188,24 @@ try {
             ]);
             exit;
         }
-        // Set actual_finish_date to current time for the update
         $actual_finish_date = date('Y-m-d H:i:s', $actualFinishDate);
     }
 
-    // Handle file upload
     $attachmentPath = null;
     $transactionStarted = false;
     if (isset($_FILES['attachment']) && $_FILES['attachment']['error'] !== UPLOAD_ERR_NO_FILE) {
         $file = $_FILES['attachment'];
         $allowedTypes = [
-            'application/pdf',                                      // PDF
-            'image/jpeg',                                          // JPG
-            'image/png',                                           // PNG
-            'application/vnd.ms-powerpoint',                       // PPT
-            'application/vnd.openxmlformats-officedocument.presentationml.presentation', // PPTX
-            'text/plain',                                          // TXT
-            'application/vnd.ms-excel',                            // XLS (Excel)
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // XLSX (Excel)
+            'application/pdf',                                              // PDF
+            'image/jpeg',                                                  // JPEG images
+            'image/png',                                                   // PNG images
+            'application/vnd.ms-powerpoint',                               // PowerPoint (.ppt)
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation', // PowerPoint (.pptx)
+            'text/plain',                                                  // Plain text
+            'application/vnd.ms-excel',                                    // Excel (.xls)
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // Excel (.xlsx)
+            'application/msword',                                          // Word (.doc)
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // Word (.docx)
         ];
         $maxSize = 5 * 1024 * 1024; // 5MB
         $uploadDir = __DIR__ . '/uploads/';
@@ -214,7 +218,7 @@ try {
         }
 
         if (!in_array($file['type'], $allowedTypes)) {
-            throw new Exception('Invalid file type: ' . $file['type'] . '. Allowed types are PDF, JPG, PNG, PPT, PPTX, TXT, XLS, XLSX.');
+            throw new Exception('Invalid file type: ' . $file['type'] . '. Allowed types are PDF, JPG, PNG, PPT, PPTX, TXT, XLS, XLSX, DOC, DOCX.');
         }
         if ($file['size'] > $maxSize) {
             throw new Exception('File size exceeds 5MB limit: ' . $file['size']);
@@ -237,18 +241,30 @@ try {
         $stmt->execute([$task_id, $filename, $attachmentPath, $currentTime, $new_status, $user_id]);
     }
 
-    // Perform task update
     if (!$transactionStarted && $new_status !== $current_status) {
         $pdo->beginTransaction();
         $transactionStarted = true;
     }
 
-    if ($new_status === $current_status) {
-        // No status change, but attachment was handled above
-    } elseif ($new_status === 'In Progress') {
-        $sql = "UPDATE tasks SET status = ?, actual_start_date = COALESCE(actual_start_date, ?) WHERE task_id = ?";
+    $details = null;
+    if ($new_status === 'Reassigned' && $reassign_user_id) {
+        $userStmt = $pdo->prepare("SELECT username FROM users WHERE id = ?");
+        $userStmt->execute([$reassign_user_id]);
+        $newAssignee = $userStmt->fetch(PDO::FETCH_ASSOC);
+        $newAssigneeUsername = $newAssignee ? $newAssignee['username'] : 'Unknown';
+
+        $sql = "UPDATE tasks SET status = ?, user_id = ? WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$new_status, $actualStartDate, $task_id]);
+        $stmt->execute([$new_status, $reassign_user_id, $task_id]);
+
+        $details = json_encode(['reassigned_to_user_id' => $reassign_user_id, 'reassigned_to_username' => $newAssigneeUsername]);
+    } elseif ($new_status === $current_status) {
+        // No status change
+    } elseif ($new_status === 'In Progress') {
+        $start_description = $_POST['completion_description'] ?? null; // Use the same form field for "What was started?"
+        $sql = "UPDATE tasks SET status = ?, actual_start_date = COALESCE(actual_start_date, ?), start_description = ? WHERE task_id = ?";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$new_status, $actualStartDate, $start_description, $task_id]);
     } elseif ($new_status === 'Completed on Time' || $new_status === 'Delayed Completion') {
         $sql = "UPDATE tasks SET status = ?, completion_description = ?, actual_finish_date = ? WHERE task_id = ?";
         $stmt = $pdo->prepare($sql);
@@ -286,9 +302,10 @@ try {
     }
 
     if ($new_status !== $current_status) {
-        $sql = "INSERT INTO task_timeline (task_id, action, previous_status, new_status, changed_by_user_id) VALUES (?, 'status_changed', ?, ?, ?)";
+        $sql = "INSERT INTO task_timeline (task_id, action, previous_status, new_status, changed_by_user_id, details) VALUES (?, ?, ?, ?, ?, ?)";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$task_id, $current_status, $new_status, $user_id]);
+        $action = ($new_status === 'Reassigned') ? 'task_reassigned' : 'status_changed';
+        $stmt->execute([$task_id, $action, $current_status, $new_status, $user_id, $details]);
     }
 
     if ($transactionStarted) {

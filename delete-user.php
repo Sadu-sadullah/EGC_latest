@@ -17,16 +17,31 @@ try {
     $pdo = new PDO($dsn, $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // Get the user ID from the POST request
-    $user_id = $_POST['user_id'];
+    // Handle OTP verification
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['otp'])) {
+        $otp = trim($_POST['otp']);
+        $user_id = $_POST['user_id'];
+        $pending_deletion = $_SESSION['pending_deletion'] ?? [];
 
-    // Delete the user from the `users` table
-    $deleteUserQuery = "DELETE FROM users WHERE id = ?";
-    $stmt = $pdo->prepare($deleteUserQuery);
-    $stmt->execute([$user_id]);
+        if (empty($pending_deletion)) {
+            $_SESSION['errorMsg'] = "Session expired. Please start the deletion process again.";
+        } elseif ($otp !== $pending_deletion['otp'] || time() > $pending_deletion['otp_expiry']) {
+            $_SESSION['errorMsg'] = "Invalid or expired OTP.";
+            $_SESSION['showDeleteOtpForm'] = true;
+        } else {
+            // Delete the user from the `users` table
+            $deleteUserQuery = "DELETE FROM users WHERE id = ?";
+            $stmt = $pdo->prepare($deleteUserQuery);
+            $stmt->execute([$user_id]);
 
-    // Set deletion message
-    $_SESSION['deletionMsg'] = "User deleted successfully.";
+            // Clear session data
+            unset($_SESSION['pending_deletion']);
+            unset($_SESSION['showDeleteOtpForm']);
+            $_SESSION['deletionMsg'] = "User deleted successfully after OTP confirmation.";
+        }
+    } else {
+        $_SESSION['errorMsg'] = "Invalid request.";
+    }
 
     // Redirect back to the view-users page
     header("Location: view-users.php");
