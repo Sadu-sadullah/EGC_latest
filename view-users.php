@@ -1,5 +1,4 @@
 <?php
-
 require 'permissions.php';
 
 ini_set('display_errors', 1);
@@ -12,6 +11,14 @@ $dsn = "mysql:host=localhost;dbname=new;charset=utf8mb4";
 $username = $config['dbUsername'];
 $password = $config['dbPassword'];
 
+// Include PHPMailer files
+require './PHPMailer-master/src/Exception.php';
+require './PHPMailer-master/src/PHPMailer.php';
+require './PHPMailer-master/src/SMTP.php';
+
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
+
 // Check if the user is logged in
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['role'])) {
     header("Location: login.php");
@@ -20,54 +27,45 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['role'])) {
 
 // Session timeout for 20 mins
 $timeout_duration = 1200;
-
 if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeout_duration) {
     session_unset();
     session_destroy();
     header("Location: portal-login.html");
     exit;
 }
-
 $_SESSION['last_activity'] = time();
 
 $user_id = $_SESSION['user_id'];
 $user_role = $_SESSION['role'];
-$user_departments = $_SESSION['departments'] ?? []; // Fetch departments from session
+$user_departments = $_SESSION['departments'] ?? [];
 $user_username = $_SESSION['username'];
 
 // Function to validate password complexity
 function validatePassword($password)
 {
-    // Password must contain at least one uppercase letter, one number, and one special character
     $uppercase = preg_match('@[A-Z]@', $password);
     $number = preg_match('@\d@', $password);
-    $specialChar = preg_match('@[^\w]@', $password); // Matches any non-word character
-
-    if (!$uppercase || !$number || !$specialChar || strlen($password) < 8) {
-        return false;
-    }
-    return true;
+    $specialChar = preg_match('@[^\w]@', $password);
+    return $uppercase && $number && $specialChar && strlen($password) >= 8;
 }
 
-// Fetch users based on role
+// Database connection
 try {
     $pdo = new PDO($dsn, $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // Prepare and execute the query to fetch the session token
+    // Check session token
     $checkStmt = $pdo->prepare("SELECT session_token FROM users WHERE id = ?");
     $checkStmt->execute([$_SESSION['user_id']]);
     $sessionToken = $checkStmt->fetchColumn();
-
-    // If the session token doesn't match, log the user out
     if ($sessionToken !== $_SESSION['session_token']) {
         session_unset();
         session_destroy();
         echo "<script>alert('Another person has logged in using the same account. Please try logging in again.'); window.location.href='portal-login.html';</script>";
     }
 
+    // Fetch users based on role
     if (hasPermission('read_all_users')) {
-        // Admin: View all users except Admins
         $stmt = $pdo->prepare("
             SELECT u.id, u.username, u.email, r.name AS role_name, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments
             FROM users u
@@ -80,7 +78,6 @@ try {
         ");
         $stmt->execute();
     } elseif (hasPermission('read_department_users')) {
-        // Manager: View only users in the same department(s), excluding Admins and their own account
         $departmentPlaceholders = implode(',', array_fill(0, count($user_departments), '?'));
         $stmt = $pdo->prepare("
             SELECT u.id, u.username, u.email, r.name AS role_name, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments
@@ -94,93 +91,160 @@ try {
             GROUP BY u.id
             ORDER BY u.username
         ");
-        // Bind department names and user ID to the query
         $params = array_merge($user_departments, [$user_id]);
         $stmt->execute($params);
     } else {
-        // Unauthorized access
         echo "You do not have the required permissions to view this page.";
         exit;
     }
-
     $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Fetch roles and departments for the modal
-    $roles = [];
-    $roleQuery = $pdo->query("SELECT id, name FROM roles WHERE name != 'Admin'");
-    if ($roleQuery) {
-        $roles = $roleQuery->fetchAll(PDO::FETCH_ASSOC);
-    }
+    $roles = $pdo->query("SELECT id, name FROM roles WHERE name != 'Admin'")->fetchAll(PDO::FETCH_ASSOC);
+    $departments = $pdo->query("SELECT id, name FROM departments")->fetchAll(PDO::FETCH_ASSOC);
 
-    $departments = [];
-    $departmentQuery = $pdo->query("SELECT id, name FROM departments");
-    if ($departmentQuery) {
-        $departments = $departmentQuery->fetchAll(PDO::FETCH_ASSOC);
+    // Handle delete request initiation
+    if (isset($_POST['initiate_delete']) && hasPermission('read_all_users')) { // Only Admins can delete
+        $delete_user_id = $_POST['user_id'];
+        $stmt = $pdo->prepare("SELECT email, username FROM users WHERE id = ?");
+        $stmt->execute([$delete_user_id]);
+        $user_to_delete = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($user_to_delete) {
+            $email = $user_to_delete['email'];
+            $username = $user_to_delete['username'];
+            $otp = sprintf("%06d", mt_rand(0, 999999));
+            $_SESSION['pending_deletion'] = [
+                'user_id' => $delete_user_id,
+                'email' => $email,
+                'username' => $username,
+                'otp' => $otp,
+                'otp_expiry' => time() + 900 // 15 minutes
+            ];
+
+            // Send OTP via email
+            $mail = new PHPMailer(true);
+            try {
+                $mail->isSMTP();
+                $mail->Host = 'smtp.zoho.com';
+                $mail->SMTPAuth = true;
+                $mail->Username = $config['email_username'];
+                $mail->Password = $config['email_password'];
+                $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+                $mail->Port = 587;
+
+                $mail->setFrom('enquiry@euroglobalconsultancy.com', 'Task Management System');
+                $mail->addAddress($email);
+
+                $mail->isHTML(true);
+                $mail->Subject = 'Confirm User Deletion - OTP';
+                $mail->Body = "Hello $username,<br><br>An administrator has requested to delete your account. Your One-Time Password (OTP) to confirm this action is: <strong>$otp</strong><br><br>This OTP will expire in 15 minutes.<br><br>Please provide this OTP to the administrator if you agree to the deletion.";
+                $mail->AltBody = "Hello $username,\n\nAn administrator has requested to delete your account. Your OTP to confirm this action is: $otp\n\nThis OTP will expire in 15 minutes.\n\nPlease provide this OTP to the administrator if you agree.";
+
+                $mail->send();
+                $_SESSION['successMsg'] = "An OTP has been sent to $email to confirm the deletion of $username.";
+                $_SESSION['showDeleteOtpForm'] = true;
+            } catch (Exception $e) {
+                $_SESSION['errorMsg'] = "Failed to send OTP for deletion. Please try again.";
+            }
+        } else {
+            $_SESSION['errorMsg'] = "User not found.";
+        }
+        header("Location: view-users.php");
+        exit;
     }
 
 } catch (PDOException $e) {
     die("Error: " . $e->getMessage());
 }
 
-// Handle form submission for creating a user
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $username = trim($_POST['username']);
-    $email = trim($_POST['email']);
-    $password = trim($_POST['password']);
-    $role_id = intval($_POST['role']);
-    $department_ids = $_POST['departments'];
+// Handle form submissions (user creation remains unchanged)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) {
+    if (isset($_POST['username']) && !isset($_POST['otp'])) {
+        $username = trim($_POST['username']);
+        $email = trim($_POST['email']);
+        $password = trim($_POST['password']);
+        $role_id = intval($_POST['role']);
+        $department_ids = $_POST['departments'];
 
-    // Validate inputs
-    if (empty($username) || empty($email) || empty($password) || empty($role_id) || empty($department_ids)) {
-        $_SESSION['errorMsg'] = "Please fill in all fields.";
+        if (empty($username) || empty($email) || empty($password) || empty($role_id) || empty($department_ids)) {
+            $_SESSION['errorMsg'] = "Please fill in all fields.";
+        } elseif (!validatePassword($password)) {
+            $_SESSION['errorMsg'] = "Password must contain at least one uppercase letter, one number, one special character, and be at least 8 characters long.";
+        } else {
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = ? OR email = ?");
+            $stmt->execute([$username, $email]);
+            if ($stmt->fetchColumn() > 0) {
+                $_SESSION['errorMsg'] = "Username or email already exists.";
+            } else {
+                $otp = sprintf("%06d", mt_rand(0, 999999));
+                $_SESSION['pending_user'] = [
+                    'username' => $username,
+                    'email' => $email,
+                    'password' => $password,
+                    'role_id' => $role_id,
+                    'department_ids' => $department_ids,
+                    'otp' => $otp,
+                    'otp_expiry' => time() + 900
+                ];
+
+                $mail = new PHPMailer(true);
+                try {
+                    $mail->isSMTP();
+                    $mail->Host = 'smtp.zoho.com';
+                    $mail->SMTPAuth = true;
+                    $mail->Username = $config['email_username'];
+                    $mail->Password = $config['email_password'];
+                    $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+                    $mail->Port = 587;
+
+                    $mail->setFrom('enquiry@euroglobalconsultancy.com', 'Task Management System');
+                    $mail->addAddress($email);
+
+                    $mail->isHTML(true);
+                    $mail->Subject = 'Verify Your Email - User Creation OTP';
+                    $mail->Body = "Hello,<br><br>Your One-Time Password (OTP) to verify your email for user creation is: <strong>$otp</strong><br><br>This OTP will expire in 15 minutes.<br><br>Please provide this OTP to the administrator to complete your account creation.";
+                    $mail->AltBody = "Hello,\n\nYour OTP to verify your email for user creation is: $otp\n\nThis OTP will expire in 15 minutes.\n\nPlease provide this OTP to the administrator.";
+
+                    $mail->send();
+                    $_SESSION['successMsg'] = "An OTP has been sent to $email. Please verify it to complete user creation.";
+                    $_SESSION['showOtpForm'] = true;
+                } catch (Exception $e) {
+                    $_SESSION['errorMsg'] = "Failed to send OTP. Please try again.";
+                }
+            }
+        }
         header("Location: view-users.php");
         exit;
-    } else {
-        // Manually check if username already exists
-        $checkUsernameQuery = "SELECT COUNT(*) FROM users WHERE username = ?";
-        $stmt = $pdo->prepare($checkUsernameQuery);
-        $stmt->execute([$username]);
-        $usernameExists = $stmt->fetchColumn();
+    } elseif (isset($_POST['otp'])) {
+        $otp = trim($_POST['otp']);
+        $pending_user = $_SESSION['pending_user'] ?? [];
 
-        if ($usernameExists > 0) {
-            $_SESSION['errorMsg'] = "This username is already taken. Please choose a different one.";
-            header("Location: view-users.php");
-            exit;
+        if (empty($pending_user)) {
+            $_SESSION['errorMsg'] = "Session expired. Please start the user creation process again.";
+        } elseif ($otp !== $pending_user['otp'] || time() > $pending_user['otp_expiry']) {
+            $_SESSION['errorMsg'] = "Invalid or expired OTP.";
+            $_SESSION['showOtpForm'] = true;
+        } else {
+            $username = $pending_user['username'];
+            $email = $pending_user['email'];
+            $password = password_hash($pending_user['password'], PASSWORD_DEFAULT);
+            $role_id = $pending_user['role_id'];
+            $department_ids = $pending_user['department_ids'];
+
+            $stmt = $pdo->prepare("INSERT INTO users (username, email, password, role_id) VALUES (?, ?, ?, ?)");
+            $stmt->execute([$username, $email, $password, $role_id]);
+            $newUserId = $pdo->lastInsertId();
+
+            $stmt = $pdo->prepare("INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)");
+            foreach ($department_ids as $department_id) {
+                $stmt->execute([$newUserId, intval($department_id)]);
+            }
+
+            unset($_SESSION['pending_user']);
+            unset($_SESSION['showOtpForm']);
+            $_SESSION['successMsg'] = "User $username created successfully after email verification.";
         }
-
-        // Manually check if email already exists
-        $checkEmailQuery = "SELECT COUNT(*) FROM users WHERE email = ?";
-        $stmt = $pdo->prepare($checkEmailQuery);
-        $stmt->execute([$email]);
-        $emailExists = $stmt->fetchColumn();
-
-        if ($emailExists > 0) {
-            $_SESSION['errorMsg'] = "This email is already registered. Please use a different one.";
-            header("Location: view-users.php");
-            exit;
-        }
-
-        // Hash the password
-        $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-
-        // Proceed with insertion since username and email are unique
-        $insertUserQuery = "INSERT INTO users (username, email, password, role_id) VALUES (?, ?, ?, ?)";
-        $stmt = $pdo->prepare($insertUserQuery);
-        $stmt->execute([$username, $email, $hashedPassword, $role_id]);
-
-        // Get the last inserted user ID
-        $newUserId = $pdo->lastInsertId();
-
-        // Insert the user-department relationships
-        $insertUserDepartmentQuery = "INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)";
-        $stmt = $pdo->prepare($insertUserDepartmentQuery);
-
-        foreach ($department_ids as $department_id) {
-            $stmt->execute([$newUserId, intval($department_id)]);
-        }
-
-        // Set success message and redirect
-        $_SESSION['successMsg'] = "User created successfully.";
         header("Location: view-users.php");
         exit;
     }
@@ -221,7 +285,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             width: 100%;
             max-width: 1400px;
             margin: 20px 0;
-            /* Changed from auto to avoid centering conflict */
             padding: 20px;
             background-color: #fff;
             border-radius: 10px;
@@ -430,7 +493,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             z-index: 9999 !important;
         }
 
-        /* Sidebar and Navbar Styles */
         .dashboard-container {
             display: flex;
             min-height: 100vh;
@@ -443,7 +505,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: white;
             padding: 20px;
             flex-shrink: 0;
-            /* Prevent sidebar from shrinking */
         }
 
         .sidebar a {
@@ -464,7 +525,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flex-grow: 1;
             padding: 20px;
             background-color: #ffffff;
-            /* Removed width: 100% to avoid flex conflict */
         }
 
         .navbar {
@@ -499,20 +559,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .user-info p {
             color: black;
         }
+
+        .otp-form-container {
+            margin-top: 20px;
+        }
+
+        .otp-form-container input[type="text"] {
+            max-width: 200px;
+            margin: 0 auto;
+        }
     </style>
 </head>
 
 <body>
-    <!-- Sidebar and Navbar -->
     <div class="dashboard-container">
-        <!-- Sidebar -->
         <div class="sidebar">
             <h3>TMS</h3>
             <a href="tasks.php">Tasks</a>
             <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
                 <a href="task-actions.php">Task Actions</a>
             <?php endif; ?>
-<?php if (hasPermission('tasks_archive')): ?>
+            <?php if (hasPermission('tasks_archive')): ?>
                 <a href="archived-tasks.php">Tasks Archive</a>
             <?php endif; ?>
             <?php if (hasPermission('read_users')): ?>
@@ -526,24 +593,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <?php endif; ?>
         </div>
 
-        <!-- Main Content -->
         <div class="main-content">
-            <!-- Navbar -->
             <div class="navbar">
-                <!-- Logo Container -->
                 <div class="d-flex align-items-center me-3">
                     <img src="images/logo/logo.webp" alt="Logo" class="logo" style="width: auto; height: 80px;">
                 </div>
-
-                <!-- User Info -->
                 <div class="user-info me-3 ms-auto">
                     <p class="mb-0">Logged in as: <strong><?= htmlspecialchars($user_username) ?></strong></p>
                     <p class="mb-0">Departments:
                         <strong><?= !empty($user_departments) ? htmlspecialchars(implode(', ', $user_departments)) : 'None' ?></strong>
                     </p>
                 </div>
-
-                <!-- Back Button -->
                 <button class="back-btn" onclick="window.location.href='welcome.php'">Dashboard</button>
             </div>
             <div class="main-container">
@@ -551,23 +611,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <h1>Users</h1>
 
                     <?php if (isset($_SESSION['successMsg'])): ?>
-                        <div class="success-message">
-                            <?= htmlspecialchars($_SESSION['successMsg']) ?>
-                        </div>
+                        <div class="success-message"><?= htmlspecialchars($_SESSION['successMsg']) ?></div>
                         <?php unset($_SESSION['successMsg']); ?>
                     <?php endif; ?>
-
                     <?php if (isset($_SESSION['deletionMsg'])): ?>
-                        <div class="deletion-message">
-                            <?= htmlspecialchars($_SESSION['deletionMsg']) ?>
-                        </div>
+                        <div class="success-message"><?= htmlspecialchars($_SESSION['deletionMsg']) ?></div>
                         <?php unset($_SESSION['deletionMsg']); ?>
                     <?php endif; ?>
-
                     <?php if (isset($_SESSION['errorMsg'])): ?>
-                        <div class="deletion-message">
-                            <?= htmlspecialchars($_SESSION['errorMsg']) ?>
-                        </div>
+                        <div class="deletion-message"><?= htmlspecialchars($_SESSION['errorMsg']) ?></div>
                         <?php unset($_SESSION['errorMsg']); ?>
                     <?php endif; ?>
 
@@ -586,7 +638,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php $count = 1 ?>
+                                    <?php $count = 1; ?>
                                     <?php foreach ($users as $user): ?>
                                         <tr>
                                             <td><?= $count++ ?></td>
@@ -598,11 +650,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                             <td>
                                                 <a href='edit-user.php?id=<?= urlencode($user['id']) ?>'
                                                     class='edit-button'>Edit</a>
-                                                <form action='delete-user.php' method='POST' style='display:inline;'>
+                                                <form action='view-users.php' method='POST' style='display:inline;'>
                                                     <input type='hidden' name='user_id'
                                                         value='<?= htmlspecialchars($user['id']) ?>'>
+                                                    <input type='hidden' name='initiate_delete' value='1'>
                                                     <button type='submit' class='delete-button'
-                                                        onclick='return confirm("Are you sure you want to delete this user?")'>Delete</button>
+                                                        onclick='return confirm("Are you sure you want to initiate deletion of this user? An OTP will be sent for confirmation.")'>Delete</button>
                                                 </form>
                                             </td>
                                         </tr>
@@ -644,10 +697,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <?php endif; ?>
 
                     <div style="text-align: right; margin-top: 20px;">
-                        <a type="button" class="back-button" data-bs-toggle="modal" data-bs-target="#createUserModal">
-                            Create User
-                        </a>
+                        <a type="button" class="back-button" data-bs-toggle="modal"
+                            data-bs-target="#createUserModal">Create User</a>
                     </div>
+
+                    <!-- OTP Verification Form for Creation -->
+                    <?php if (isset($_SESSION['showOtpForm']) && $_SESSION['showOtpForm']): ?>
+                        <div class="otp-form-container">
+                            <h2>Verify OTP for Creation</h2>
+                            <form method="POST" action="view-users.php">
+                                <div class="form-group">
+                                    <label for="otp">Enter OTP sent to
+                                        <?= htmlspecialchars($_SESSION['pending_user']['email']) ?></label>
+                                    <input type="text" id="otp" name="otp" placeholder="Enter 6-digit OTP" required
+                                        maxlength="6" pattern="\d{6}">
+                                </div>
+                                <button type="submit" class="back-button">Verify OTP</button>
+                            </form>
+                        </div>
+                    <?php endif; ?>
+
+                    <!-- OTP Verification Form for Deletion -->
+                    <?php if (isset($_SESSION['showDeleteOtpForm']) && $_SESSION['showDeleteOtpForm']): ?>
+                        <div class="otp-form-container">
+                            <h2>Verify OTP for Deletion</h2>
+                            <form method="POST" action="delete-user.php">
+                                <div class="form-group">
+                                    <label for="delete_otp">Enter OTP sent to
+                                        <?= htmlspecialchars($_SESSION['pending_deletion']['email']) ?></label>
+                                    <input type="text" id="delete_otp" name="otp" placeholder="Enter 6-digit OTP" required
+                                        maxlength="6" pattern="\d{6}">
+                                    <input type="hidden" name="user_id"
+                                        value="<?= htmlspecialchars($_SESSION['pending_deletion']['user_id']) ?>">
+                                </div>
+                                <button type="submit" class="back-button">Confirm Deletion</button>
+                            </form>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -671,7 +757,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <div class="form-group mb-3">
                             <label for="password">Password</label>
                             <input type="password" id="password" name="password" class="form-control" required>
-                            <!-- Error message for password validation -->
                             <div id="passwordError" class="text-danger" style="display: none;">
                                 Password must contain at least one uppercase letter, one number, one special character,
                                 and be at least 8 characters long.
@@ -699,7 +784,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </select>
                         </div>
                         <div class="modal-footer">
-                            <button type="submit" class="btn btn-primary">Create User</button>
+                            <button type="submit" class="btn btn-primary">Request OTP</button>
                         </div>
                     </form>
                 </div>
@@ -709,100 +794,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <!-- Jquery -->
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
-
     <!-- Select 2 -->
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        // Initialize Select2 for the departments dropdown
         $(document).ready(function () {
             $('#departments').select2({
-                placeholder: "Select departments", // Placeholder text
-                allowClear: true, // Allow clearing selections
-                closeOnSelect: false // Keep the dropdown open after selecting an item
+                placeholder: "Select departments",
+                allowClear: true,
+                closeOnSelect: false
             });
         });
 
-        // Password validation function
-        function validatePassword(password) {
-            const uppercase = /[A-Z]/.test(password);
-            const number = /\d/.test(password);
-            const specialChar = /[^\w]/.test(password);
-
-            if (!uppercase || !number || !specialChar || password.length < 8) {
-                return false;
-            }
-            return true;
-        }
-
-        // Add form submission validation
         document.getElementById('createUserForm').addEventListener('submit', function (event) {
             const password = document.getElementById('password').value;
             const passwordError = document.getElementById('passwordError');
             const departments = document.getElementById('departments');
 
-            // Validate password
             if (!validatePassword(password)) {
-                event.preventDefault(); // Prevent form submission
-                passwordError.style.display = 'block'; // Show the error message
+                event.preventDefault();
+                passwordError.style.display = 'block';
             } else {
-                passwordError.style.display = 'none'; // Hide the error message if valid
+                passwordError.style.display = 'none';
             }
 
-            // Validate departments
             if (departments.selectedOptions.length === 0) {
-                event.preventDefault(); // Prevent form submission
-                alert('Please select at least one department.'); // Show an alert
+                event.preventDefault();
+                alert('Please select at least one department.');
             }
         });
-    </script>
 
-    <script>
-        // Open the modal using Bootstrap's modal method
-        function openModal() {
-            const modal = new bootstrap.Modal(document.getElementById('createUserModal'));
-            modal.show();
-        }
-
-        // Close the modal using Bootstrap's modal method
-        function closeModal() {
-            const modal = bootstrap.Modal.getInstance(document.getElementById('createUserModal'));
-            modal.hide();
-        }
-
-        // Password validation function
         function validatePassword(password) {
             const uppercase = /[A-Z]/.test(password);
             const number = /\d/.test(password);
             const specialChar = /[^\w]/.test(password);
-
-            if (!uppercase || !number || !specialChar || password.length < 8) {
-                return false;
-            }
-            return true;
+            return uppercase && number && specialChar && password.length >= 8;
         }
-
-        // Add form submission validation
-        document.getElementById('createUserForm').addEventListener('submit', function (event) {
-            const password = document.getElementById('password').value;
-            const passwordError = document.getElementById('passwordError');
-
-            if (!validatePassword(password)) {
-                event.preventDefault(); // Prevent form submission
-                passwordError.style.display = 'block'; // Show the error message
-            } else {
-                passwordError.style.display = 'none'; // Hide the error message if valid
-            }
-
-            // Validate departments
-            if (departments.selectedOptions.length === 0) {
-                event.preventDefault(); // Prevent form submission
-                alert('Please select at least one department.'); // Show an alert
-            }
-        });
     </script>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 
 </html>
