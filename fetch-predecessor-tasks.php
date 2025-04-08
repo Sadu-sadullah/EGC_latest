@@ -12,7 +12,6 @@ $dbUsername = $config['dbUsername'];
 $dbPassword = $config['dbPassword'];
 $dbName = 'new';
 
-// Create connection
 $conn = new mysqli($dbHost, $dbUsername, $dbPassword, $dbName);
 if ($conn->connect_error) {
     echo json_encode(["error" => "Database connection failed: " . $conn->connect_error]);
@@ -22,24 +21,25 @@ if ($conn->connect_error) {
 // Get input values
 $projectId = $_POST['project_id'] ?? 0;
 $userId = $_POST['user_id'] ?? 0;
-$projectType = $_POST['project_type'] ?? ''; // Add project_type
+$projectType = $_POST['project_type'] ?? '';
 
 // Validate inputs
-if (empty($projectId) || empty($userId) || empty($projectType)) {
-    echo json_encode(["error" => "Invalid input: Project ID, User ID, or Project Type is missing."]);
+if (empty($projectId) || empty($userId)) { // Removed $projectType from required validation
+    echo json_encode(["error" => "Invalid input: Project ID or User ID is missing."]);
     exit;
 }
 
-// Prepare the SQL query
+// Prepare the SQL query with join to projects table
 $predecessorTasksQuery = $conn->prepare("
-    SELECT task_id, task_name 
-    FROM tasks 
-    WHERE predecessor_task_id IS NULL 
-      AND status = 'Assigned' 
-      AND assigned_by_id = ? 
-      AND project_id = ? 
-      AND project_type = ? 
-    ORDER BY recorded_timestamp DESC
+    SELECT t.task_id, t.task_name 
+    FROM tasks t
+    JOIN projects p ON t.project_id = p.id
+    WHERE t.predecessor_task_id IS NULL 
+      AND t.status = 'Assigned' 
+      AND t.assigned_by_id = ? 
+      AND t.project_id = ? 
+      AND p.project_type = ? 
+    ORDER BY t.recorded_timestamp DESC
 ");
 
 // Bind parameters and execute query
@@ -52,14 +52,8 @@ while ($row = $result->fetch_assoc()) {
     $tasks[] = $row;
 }
 
-// Ensure JSON encoding is successful
-if (json_last_error() !== JSON_ERROR_NONE) {
-    echo json_encode(["error" => "JSON encoding error: " . json_last_error_msg()]);
-    exit;
-}
-
 // Return tasks as JSON
 header('Content-Type: application/json');
-echo json_encode($tasks);
+echo json_encode(["success" => true, "tasks" => $tasks]);
 exit;
 ?>
