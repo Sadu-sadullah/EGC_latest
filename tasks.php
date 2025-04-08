@@ -2247,12 +2247,38 @@ function getWeekdayHours($start, $end)
                 document.getElementById('predecessor_task_id').innerHTML = '<option value="">Select a predecessor task</option>';
                 return;
             }
-            fetch('fetch-predecessor-tasks.php', {
+
+            // Fetch project details to get project_type
+            fetch('get-project-details.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: `project_id=${encodeURIComponent(projectId)}&user_id=<?= $user_id ?>`
+                body: `project_id=${encodeURIComponent(projectId)}`
             })
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch project details: ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(projectData => {
+                    if (!projectData.success || !projectData.project_type) {
+                        throw new Error('Invalid project data: ' + (projectData.message || 'No project type returned'));
+                    }
+                    const projectType = projectData.project_type;
+
+                    // Fetch predecessor tasks with project_type included
+                    return fetch('fetch-predecessor-tasks.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: `project_id=${encodeURIComponent(projectId)}&user_id=<?= $user_id ?>&project_type=${encodeURIComponent(projectType)}`
+                    });
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch predecessor tasks: ' + response.statusText);
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     const predecessorDropdown = document.getElementById('predecessor_task_id');
                     predecessorDropdown.innerHTML = '<option value="">Select a predecessor task</option>';
@@ -2271,7 +2297,11 @@ function getWeekdayHours($start, $end)
                         predecessorDropdown.appendChild(option);
                     }
                 })
-                .catch(error => console.error('Error fetching predecessor tasks:', error));
+                .catch(error => {
+                    console.error('Error fetching predecessor tasks:', error);
+                    const predecessorDropdown = document.getElementById('predecessor_task_id');
+                    predecessorDropdown.innerHTML = '<option value="">Error loading tasks</option>';
+                });
         }
 
         function toggleExternalFields() {
