@@ -22,21 +22,23 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-// Set timezone
-date_default_timezone_set(isset($_COOKIE['user_timezone']) ? $_COOKIE['user_timezone'] : 'UTC');
+// Get user's timezone from cookie or default to UTC
+$userTimezone = isset($_COOKIE['user_timezone']) ? $_COOKIE['user_timezone'] : 'UTC';
+date_default_timezone_set($userTimezone);
 
 // Function to validate password complexity
-function validatePassword($password) {
-    return preg_match('@[A-Z]@', $password) && 
-           preg_match('@\d@', $password) && 
-           preg_match('@[^\w]@', $password) && 
-           strlen($password) >= 8;
+function validatePassword($password)
+{
+    return preg_match('@[A-Z]@', $password) &&
+        preg_match('@\d@', $password) &&
+        preg_match('@[^\w]@', $password) &&
+        strlen($password) >= 8;
 }
 
 // Handle username submission for OTP
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['username']) && !isset($_POST['otp'])) {
     $username = trim($_POST['username']);
-    
+
     $stmt = $conn->prepare("SELECT email FROM users WHERE username = ?");
     $stmt->bind_param("s", $username);
     $stmt->execute();
@@ -48,11 +50,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['username']) && !isset(
 
         // Generate 6-digit OTP
         $otp = sprintf("%06d", mt_rand(0, 999999));
-        $expiry = date('Y-m-d H:i:s', strtotime('+15 minutes'));
 
-        // Store OTP and expiry in database
+        // Calculate expiry time in user's timezone, then convert to UTC for storage
+        $dateTime = new DateTime('now', new DateTimeZone($userTimezone));
+        $dateTime->modify('+15 minutes');
+        $expiryDisplay = $dateTime->format('Y-m-d H:i:s'); // For email display
+        $dateTime->setTimezone(new DateTimeZone('UTC')); // Convert to UTC for DB
+        $expiryUtc = $dateTime->format('Y-m-d H:i:s');
+
+        // Store OTP and UTC expiry in database
         $updateStmt = $conn->prepare("UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE username = ?");
-        $updateStmt->bind_param("sss", $otp, $expiry, $username);
+        $updateStmt->bind_param("sss", $otp, $expiryUtc, $username);
         $updateStmt->execute();
         $updateStmt->close();
 
@@ -72,8 +80,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['username']) && !isset(
 
             $mail->isHTML(true);
             $mail->Subject = 'Your Password Reset OTP';
-            $mail->Body = "Hello,<br><br>Your One-Time Password (OTP) for password reset is: <strong>$otp</strong><br><br>This OTP will expire in 15 minutes (" . date('T') . ").<br><br>If you didn’t request this, please ignore this email.";
-            $mail->AltBody = "Hello,\n\nYour One-Time Password (OTP) for password reset is: $otp\n\nThis OTP will expire in 15 minutes (" . date('T') . ").\n\nIf you didn’t request this, please ignore this email.";
+            $mail->Body = "Hello,<br><br>Your One-Time Password (OTP) for password reset is: <strong>$otp</strong><br><br>This OTP will expire in 15 minutes (" . htmlspecialchars($expiryDisplay) . " " . htmlspecialchars($userTimezone) . ").<br><br>If you didn’t request this, please ignore this email.";
+            $mail->AltBody = "Hello,\n\nYour One-Time Password (OTP) for password reset is: $otp\n\nThis OTP will expire in 15 minutes (" . htmlspecialchars($expiryDisplay) . " " . htmlspecialchars($userTimezone) . ").\n\nIf you didn’t request this, please ignore this email.";
 
             $mail->send();
             $_SESSION['reset_username'] = $username; // Store username for next step
@@ -92,11 +100,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['username']) && !isset(
 elseif ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['otp'])) {
     $otp = trim($_POST['otp']);
     $username = $_SESSION['reset_username'] ?? '';
-    
+
     if (empty($username)) {
         $errorMsg = "Session expired. Please start the reset process again.";
     } else {
-        $stmt = $conn->prepare("SELECT email, password FROM users WHERE username = ? AND reset_token = ? AND reset_token_expiry > NOW()");
+        // Check OTP against UTC time in DB
+        $stmt = $conn->prepare("SELECT email, password FROM users WHERE username = ? AND reset_token = ? AND reset_token_expiry > UTC_TIMESTAMP()");
         $stmt->bind_param("ss", $username, $otp);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -263,14 +272,16 @@ $conn->close();
                     <label for="new_password">New Password</label>
                     <input type="password" id="new_password" name="new_password" placeholder="Enter new password" required>
                     <label for="confirm_password">Confirm Password</label>
-                    <input type="password" id="confirm_password" name="confirm_password" placeholder="Confirm new password" required>
+                    <input type="password" id="confirm_password" name="confirm_password" placeholder="Confirm new password"
+                        required>
                     <input type="hidden" name="otp" value="<?= htmlspecialchars($otp ?? '') ?>">
                     <button type="submit">Reset Password</button>
                 </form>
             <?php else: ?>
                 <form method="post">
                     <label for="otp">Enter OTP</label>
-                    <input type="text" id="otp" name="otp" placeholder="Enter 6-digit OTP" required maxlength="6" pattern="\d{6}">
+                    <input type="text" id="otp" name="otp" placeholder="Enter 6-digit OTP" required maxlength="6"
+                        pattern="\d{6}">
                     <button type="submit">Verify OTP</button>
                 </form>
             <?php endif; ?>
