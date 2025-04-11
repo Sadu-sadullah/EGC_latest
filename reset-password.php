@@ -81,11 +81,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['username']) && !isset(
             $mail->isHTML(true);
             $mail->Subject = 'Your Password Reset OTP';
             $mail->Body = "Hello,<br><br>Your One-Time Password (OTP) for password reset is: <strong>$otp</strong><br><br>This OTP will expire in 15 minutes (" . htmlspecialchars($expiryDisplay) . " " . htmlspecialchars($userTimezone) . ").<br><br>If you didn’t request this, please ignore this email.";
-            $mail->AltBody = "Hello,\n\nYour One-Time Password (OTP) for password reset is: $otp\n\nThis OTP will expire in 15 minutes (" . htmlspecialchars($expiryDisplay) . " " . htmlspecialchars($userTimezone) . ").\n\nIf you didn’t request this, please ignore this email.";
+            $mail->AltBody = "Hello,\n\nYour OTP for password reset is: $otp\n\nThis OTP will expire in 15 minutes (" . htmlspecialchars($expiryDisplay) . " " . htmlspecialchars($userTimezone) . ").\n\nIf you didn’t request this, please ignore this email.";
 
             $mail->send();
             $_SESSION['reset_username'] = $username; // Store username for next step
-            $successMsg = "An OTP has been sent to your registered email. Please check your inbox (and spam/junk folder).";
+            $successMsg = isset($_GET['restored']) && $_GET['restored'] === 'true'
+                ? "Your account has been restored. An OTP has been sent to your email to reset your password."
+                : "An OTP has been sent to your registered email. Please check your inbox (and spam/junk folder).";
             $showOtpForm = true;
         } catch (Exception $e) {
             $errorMsg = "Failed to send OTP. Please try again later.";
@@ -105,7 +107,7 @@ elseif ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['otp'])) {
         $errorMsg = "Session expired. Please start the reset process again.";
     } else {
         // Check OTP against UTC time in DB
-        $stmt = $conn->prepare("SELECT email, password FROM users WHERE username = ? AND reset_token = ? AND reset_token_expiry > UTC_TIMESTAMP()");
+        $stmt = $conn->prepare("SELECT email FROM users WHERE username = ? AND reset_token = ? AND reset_token_expiry > UTC_TIMESTAMP()");
         $stmt->bind_param("ss", $username, $otp);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -123,10 +125,6 @@ elseif ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['otp'])) {
                     $otpVerified = true;
                 } elseif (!validatePassword($newPassword)) {
                     $errorMsg = "Password must be at least 8 characters long and include one uppercase letter, one number, and one special character.";
-                    $showOtpForm = true;
-                    $otpVerified = true;
-                } elseif (password_verify($newPassword, $user['password'])) {
-                    $errorMsg = "New password cannot be the same as your current password.";
                     $showOtpForm = true;
                     $otpVerified = true;
                 } else {
@@ -288,7 +286,8 @@ $conn->close();
         <?php else: ?>
             <form method="post">
                 <label for="username">Username</label>
-                <input type="text" id="username" name="username" placeholder="Enter your username" required>
+                <input type="text" id="username" name="username" placeholder="Enter your username" required
+                    value="<?= htmlspecialchars($_SESSION['reset_username'] ?? '') ?>">
                 <button type="submit">Request OTP</button>
             </form>
         <?php endif; ?>

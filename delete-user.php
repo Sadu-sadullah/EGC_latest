@@ -1,8 +1,9 @@
 <?php
 session_start();
+require 'permissions.php';
 
 // Check if the user is logged in and has the necessary permissions
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'Admin') {
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || !hasPermission('read_all_users')) { // Updated permission check
     header("Location: login.php");
     exit;
 }
@@ -29,15 +30,44 @@ try {
             $_SESSION['errorMsg'] = "Invalid or expired OTP.";
             $_SESSION['showDeleteOtpForm'] = true;
         } else {
-            // Delete the user from the `users` table
-            $deleteUserQuery = "DELETE FROM users WHERE id = ?";
-            $stmt = $pdo->prepare($deleteUserQuery);
+            // Fetch user details before deletion
+            $stmt = $pdo->prepare("
+                SELECT u.id, u.username, u.email, u.role_id, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments
+                FROM users u
+                LEFT JOIN user_departments ud ON u.id = ud.user_id
+                LEFT JOIN departments d ON ud.department_id = d.id
+                WHERE u.id = ?
+                GROUP BY u.id
+            ");
             $stmt->execute([$user_id]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            // Clear session data
-            unset($_SESSION['pending_deletion']);
-            unset($_SESSION['showDeleteOtpForm']);
-            $_SESSION['deletionMsg'] = "User deleted successfully after OTP confirmation.";
+            if ($user) {
+                // Insert into audit table
+                $auditStmt = $pdo->prepare("
+                    INSERT INTO user_deletion_audit (user_id, username, email, role_id, departments, deleted_by)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ");
+                $auditStmt->execute([
+                    $user['id'],
+                    $user['username'],
+                    $user['email'],
+                    $user['role_id'],
+                    $user['departments'],
+                    $_SESSION['user_id']
+                ]);
+
+                // Delete from users table
+                $deleteStmt = $pdo->prepare("DELETE FROM users WHERE id = ?");
+                $deleteStmt->execute([$user_id]);
+
+                // Clear session data
+                unset($_SESSION['pending_deletion']);
+                unset($_SESSION['showDeleteOtpForm']);
+                $_SESSION['deletionMsg'] = "User '{$user['username']}' deleted successfully and logged in audit trail.";
+            } else {
+                $_SESSION['errorMsg'] = "User not found.";
+            }
         }
     } else {
         $_SESSION['errorMsg'] = "Invalid request.";
@@ -48,7 +78,6 @@ try {
     exit;
 
 } catch (PDOException $e) {
-    // Handle any errors
     die("Error: " . $e->getMessage());
 }
 ?>
