@@ -103,6 +103,61 @@ try {
     $roles = $pdo->query("SELECT id, name FROM roles WHERE name != 'Admin'")->fetchAll(PDO::FETCH_ASSOC);
     $departments = $pdo->query("SELECT id, name FROM departments")->fetchAll(PDO::FETCH_ASSOC);
 
+    // Handle user restoration
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['restore_user_id']) && hasPermission('read_all_users')) {
+        $restore_user_id = $_POST['restore_user_id'];
+
+        // Fetch audit data
+        $auditStmt = $pdo->prepare("SELECT * FROM user_deletion_audit WHERE user_id = ?");
+        $auditStmt->execute([$restore_user_id]);
+        $audit = $auditStmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($audit) {
+            // Use a temporary password placeholder
+            $tempPassword = 'RESET_REQUIRED'; // Unhashed, acts as a flag
+
+            // Re-insert into users table with temporary password
+            $restoreStmt = $pdo->prepare("INSERT INTO users (id, username, email, role_id, password) VALUES (?, ?, ?, ?, ?)");
+            $restoreStmt->execute([$audit['user_id'], $audit['username'], $audit['email'], $audit['role_id'], $tempPassword]);
+
+            // Restore departments
+            if (!empty($audit['departments'])) {
+                $departments = explode(', ', $audit['departments']);
+                $deptStmt = $pdo->prepare("SELECT id FROM departments WHERE name = ?");
+                $insertDeptStmt = $pdo->prepare("INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)");
+                foreach ($departments as $deptName) {
+                    $deptStmt->execute([$deptName]);
+                    $deptId = $deptStmt->fetchColumn();
+                    if ($deptId) {
+                        $insertDeptStmt->execute([$audit['user_id'], $deptId]);
+                    }
+                }
+            }
+
+            // Remove from audit table
+            $deleteAuditStmt = $pdo->prepare("DELETE FROM user_deletion_audit WHERE user_id = ?");
+            $deleteAuditStmt->execute([$restore_user_id]);
+
+            $_SESSION['successMsg'] = "User '{$audit['username']}' restored successfully. They must reset their password on next login.";
+        } else {
+            $_SESSION['errorMsg'] = "User not found in audit trail.";
+        }
+        header("Location: view-users.php");
+        exit;
+    }
+
+    // Fetch audit trail data (unchanged)
+    if (hasPermission('read_all_users')) {
+        $auditStmt = $pdo->prepare("
+        SELECT uda.*, u.username AS deleted_by_username
+        FROM user_deletion_audit uda
+        LEFT JOIN users u ON uda.deleted_by = u.id
+        ORDER BY uda.deleted_at DESC
+    ");
+        $auditStmt->execute();
+        $auditRecords = $auditStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     // Handle delete request initiation
     if (isset($_POST['initiate_delete']) && hasPermission('read_all_users')) { // Only Admins can delete
         $delete_user_id = $_POST['user_id'];
@@ -114,12 +169,22 @@ try {
             $email = $user_to_delete['email'];
             $username = $user_to_delete['username'];
             $otp = sprintf("%06d", mt_rand(0, 999999));
+
+            // Get user's timezone from cookie or default to UTC
+            $userTimezone = isset($_COOKIE['user_timezone']) ? $_COOKIE['user_timezone'] : 'UTC';
+
+            // Calculate expiry time in user's timezone
+            $dateTime = new DateTime('now', new DateTimeZone($userTimezone));
+            $dateTime->modify('+15 minutes');
+            $expiryDisplay = $dateTime->format('Y-m-d H:i:s'); // For email display
+            $expiryTimestamp = $dateTime->getTimestamp(); // For session storage
+
             $_SESSION['pending_deletion'] = [
                 'user_id' => $delete_user_id,
                 'email' => $email,
                 'username' => $username,
                 'otp' => $otp,
-                'otp_expiry' => time() + 900 // 15 minutes
+                'otp_expiry' => $expiryTimestamp // Store as timestamp
             ];
 
             // Send OTP via email
@@ -138,8 +203,8 @@ try {
 
                 $mail->isHTML(true);
                 $mail->Subject = 'Confirm User Deletion - OTP';
-                $mail->Body = "Hello $username,<br><br>An administrator has requested to delete your account. Your One-Time Password (OTP) to confirm this action is: <strong>$otp</strong><br><br>This OTP will expire in 15 minutes.<br><br>Please provide this OTP to the administrator if you agree to the deletion.";
-                $mail->AltBody = "Hello $username,\n\nAn administrator has requested to delete your account. Your OTP to confirm this action is: $otp\n\nThis OTP will expire in 15 minutes.\n\nPlease provide this OTP to the administrator if you agree.";
+                $mail->Body = "Hello $username,<br><br>An administrator has requested to delete your account. Your One-Time Password (OTP) to confirm this action is: <strong>$otp</strong><br><br>This OTP will expire at " . htmlspecialchars($expiryDisplay) . " (" . htmlspecialchars($userTimezone) . ").<br><br>Please provide this OTP to the administrator if you agree to the deletion.";
+                $mail->AltBody = "Hello $username,\n\nAn administrator has requested to delete your account. Your OTP to confirm this action is: $otp\n\nThis OTP will expire at " . htmlspecialchars($expiryDisplay) . " (" . htmlspecialchars($userTimezone) . ").\n\nPlease provide this OTP to the administrator if you agree.";
 
                 $mail->send();
                 $_SESSION['successMsg'] = "An OTP has been sent to $email to confirm the deletion of $username.";
@@ -568,6 +633,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
             max-width: 200px;
             margin: 0 auto;
         }
+
+        .modal-body table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 0;
+        }
+
+        .modal-body table th,
+        .modal-body table td {
+            padding: 10px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }
+
+        .modal-body table th {
+            background-color: #1d3557;
+            color: #fff;
+            font-weight: bold;
+        }
+
+        .modal-body table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
     </style>
 </head>
 
@@ -700,6 +788,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
                         <a type="button" class="back-button" data-bs-toggle="modal"
                             data-bs-target="#createUserModal">Create User</a>
                     </div>
+
+                    <?php if (hasPermission('read_all_users')): ?>
+                        <div style="text-align: right; margin-top: 20px;">
+                            <button type="button" class="back-button" data-bs-toggle="modal"
+                                data-bs-target="#auditTrailModal">View Deletion Audit Trail</button>
+                        </div>
+                    <?php endif; ?>
+
+                    <!-- Modal for Audit Trail -->
+                    <?php if (hasPermission('read_all_users')): ?>
+                        <div class="modal fade" id="auditTrailModal" tabindex="-1" aria-labelledby="auditTrailModalLabel"
+                            aria-hidden="true">
+                            <div class="modal-dialog modal-lg">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title text-center w-100" id="auditTrailModalLabel">User Deletion
+                                            Audit Trail</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                            aria-label="Close"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <?php if (!empty($auditRecords)): ?>
+                                            <table class="table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>#</th>
+                                                        <th>Username</th>
+                                                        <th>Email</th>
+                                                        <th>Role</th>
+                                                        <th>Departments</th>
+                                                        <th>Deleted By</th>
+                                                        <th>Deleted At</th>
+                                                        <th>Action</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <?php $auditCount = 1; ?>
+                                                    <?php foreach ($auditRecords as $record): ?>
+                                                        <tr>
+                                                            <td><?= $auditCount++ ?></td>
+                                                            <td><?= htmlspecialchars($record['username']) ?></td>
+                                                            <td><?= htmlspecialchars($record['email']) ?></td>
+                                                            <td>
+                                                                <?php
+                                                                $roleStmt = $pdo->prepare("SELECT name FROM roles WHERE id = ?");
+                                                                $roleStmt->execute([$record['role_id']]);
+                                                                echo htmlspecialchars($roleStmt->fetchColumn());
+                                                                ?>
+                                                            </td>
+                                                            <td><?= htmlspecialchars($record['departments'] ?: 'None') ?></td>
+                                                            <td><?= htmlspecialchars($record['deleted_by_username']) ?></td>
+                                                            <td><?= htmlspecialchars($record['deleted_at']) ?></td>
+                                                            <td>
+                                                                <form action="view-users.php" method="POST" style="display:inline;">
+                                                                    <input type="hidden" name="restore_user_id"
+                                                                        value="<?= $record['user_id'] ?>">
+                                                                    <button type="submit" class="edit-button"
+                                                                        onclick="return confirm('Are you sure you want to restore this user?')">Restore</button>
+                                                                </form>
+                                                            </td>
+                                                        </tr>
+                                                    <?php endforeach; ?>
+                                                </tbody>
+                                            </table>
+                                        <?php else: ?>
+                                            <p>No deletion records found.</p>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endif; ?>
 
                     <!-- OTP Verification Form for Creation -->
                     <?php if (isset($_SESSION['showOtpForm']) && $_SESSION['showOtpForm']): ?>

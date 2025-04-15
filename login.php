@@ -40,6 +40,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if ($result->num_rows > 0) {
         $user = $result->fetch_assoc();
 
+        // Check if password is the reset placeholder
+        if ($user['password'] === 'RESET_REQUIRED') {
+            $_SESSION['reset_username'] = $username; // Store username for reset process
+            echo "<script>alert('Your account has been restored. Please reset your password to continue.'); window.location.href = 'reset-password.php?restored=true';</script>";
+            exit;
+        }
+
         // Verify the password
         if (password_verify($password, $user['password'])) {
             // Generate a unique session token

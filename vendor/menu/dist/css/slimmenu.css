@@ -59,7 +59,7 @@
 #mega-menu-holder li .sub-toggle {
     font-family: 'font-awesome';
     position: absolute;
-    right: 26px;
+    left: -5px;
     top: 0;
     line-height: 75px;
     color: #8f97ab;
