@@ -612,6 +612,7 @@ body .theme-button-one:hover {
 }
 .theme-menu-wrapper .menu-wrapper nav#mega-menu-holder ul li ul.dropdown li a:hover {
   background: #f5f5f5;
+  color: white;
 }
 .theme-menu-wrapper .right-widget {
   float: right;

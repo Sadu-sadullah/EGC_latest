@@ -230,94 +230,9 @@
       <div class="hero-overlay"></div>
       <div class="container">
         <div class="hero-content">
-          <h1>Task Management System</h1>
-          <p class="lead">Streamline your team's productivity with a customizable, web-based solution.</p>
+          <h1>Vessel Inspection System</h1>
+          <p class="lead">Contact us for more info or a personalized setup.</p>
           <a href="contact_demo.html" class="theme-button-one mt-3">Book a demo</a>
-        </div>
-      </div>
-    </section>
-
-    <!-- Introduction Section -->
-    <section class="intro-section">
-      <div class="container">
-        <h2 class="text-center mb-4">Introduction to Task Management System</h2>
-        <div class="intro-content">
-          <p>
-            The Task Management System, developed by Euro Global Consultancy, is a robust web-based platform designed to enhance team collaboration and project efficiency. It provides a flexible permission-based access control system where roles can be assigned specific permissions. This system is ideal for small and medium sized businesses, offering a scalable solution to manage tasks, projects, and user accounts seamlessly.
-          </p>
-          <p>
-            Key functionalities include task management with status updates, project creation with customer details, and user administration with audit trails. The system supports file uploads (PPT, PPTX, TXT, Excel), CSV exports, and secure features like password hashing and timezone-aware OTPs for deletions. With a responsive interface and enhancements, it works across modern web browsers (i.e Chrome, Firefox, and Edge) ensuring a smooth experience for all users.
-          </p>
-          <p>
-            The Task Management System adapts to your needs. It tracks updates in a timeline, links tasks to projects, and provides detailed audit logs for user management. Security is prioritized with session authentication, making it a reliable choice for modern project management.
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <!-- Features Section -->
-    <section class="features-section">
-      <div class="container">
-        <h2 class="text-center mb-5">Why Choose EGC's Task Management System?</h2>
-        <div class="row">
-          <div class="col-lg-4 col-md-6">
-            <div class="feature-card">
-              <h4>Task Management</h4>
-              <p>Efficiently manage and filter tasks with file uploads and timeline tracking.</p>
-            </div>
-          </div>
-          <div class="col-lg-4 col-md-6">
-          <div class="feature-card">
-            <h4>Dashboard Feature</h4>
-            <p>Access a centralized dashboard that provides a real-time overview of tasks, projects, and team performance.</p>
-          </div>
-          </div>
-          <div class="col-lg-4 col-md-6">
-            <div class="feature-card">
-              <h4>User Administration</h4>
-              <p>Control users with role-based permissions and detailed audit trails.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Gallery Section with Fancybox -->
-    <section class="gallery-section">
-      <div class="container">
-        <h2 class="text-center mb-4">See It in Action</h2>
-        <div class="row">
-          <div class="col-lg-4 col-md-6">
-            <a href="images/home/1.png" data-fancybox="gallery" data-caption="Task Management Dashboard">
-              <img src="images/home/1.png" alt="Task Management Dashboard">
-            </a>
-          </div>
-          <div class="col-lg-4 col-md-6">
-            <a href="images/home/2.png" data-fancybox="gallery" data-caption="Task Update Interface">
-              <img src="images/home/2.png" alt="Task Update Interface">
-            </a>
-          </div>
-          <div class="col-lg-4 col-md-6">
-            <a href="images/home/3.png" data-fancybox="gallery" data-caption="Project Management View">
-              <img src="images/home/3.png" alt="Project Management View">
-            </a>
-          </div>
-        </div>
-      </div>
-    </section>
-    <section class="implementation-section mb-5">
-      <div class="container">
-        <h2 class="text-center mb-4">Implementation Model</h2>
-        <button class="collapse-btn" onclick="toggleDetails()">View Details</button>
-        <div id="requirements-details" class="requirements-details">
-          <h3>Cloud-Based Deployment</h3>
-          <p>Host the Task Management System on a secure cloud infrastructure, offering scalability, automatic updates,
-            and accessibility from anywhere with an internet connection. Ideal for teams seeking minimal setup and
-            maintenance.</p>
-          <h3>On-Premises Deployment</h3>
-          <p>Install the system on your local servers for full control and data privacy. Requires local setup</p>
-          <p>For a personalized on-premises setup, <a href="contact_demo.html">Contact Us</a>
-            to schedule a demo.</p>
         </div>
       </div>
     </section>
@@ -479,32 +394,6 @@
     <script src="vendor/jquery.countTo.js"></script>
     <script src="vendor/fancybox/dist/jquery.fancybox.min.js"></script>
     <script src="js/theme.js"></script>
-    <script>
-      function toggleDetails() {
-        const details = document.getElementById('requirements-details');
-        if (details.style.display === 'block') {
-          details.style.display = 'none';
-        } else {
-          details.style.display = 'block';
-        }
-      }
-
-      // Ensure hero section is fully loaded
-      window.addEventListener('load', function() {
-        document.querySelector('.hero-section').style.opacity = 1;
-      });
-
-      // Initialize Fancybox for gallery
-      $(document).ready(function() {
-        $('[data-fancybox="gallery"]').fancybox({
-          loop: true,
-          buttons: ['zoom', 'slideShow', 'fullScreen', 'close'],
-          image: {
-            protect: true
-          }
-        });
-      });
-    </script>
   </div>
 </body>
 
