@@ -664,6 +664,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
         <div class="sidebar">
             <h3>TMS</h3>
             <a href="tasks.php">Tasks</a>
+            <?php if (hasPermission('view_projects')): ?>
+                <a href="projects.php">Projects</a>
+            <?php endif; ?>
             <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
                 <a href="task-actions.php">Task Actions</a>
             <?php endif; ?>

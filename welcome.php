@@ -1,11 +1,7 @@
 <?php
-
 ini_set('display_errors', 1);
-// This code sets the display_errors configuration directive to 1, which enables error reporting.
 ini_set('display_startup_errors', 1);
-// This code sets the display_startup_errors configuration directive to 1, which enables error reporting when PHP is starting up.
 error_reporting(E_ALL);
-// This code sets the error_reporting configuration directive to E_ALL, which enables all types of error reporting.
 
 // Start session
 session_start();
@@ -14,7 +10,6 @@ require 'permissions.php';
 
 // Check if the user is logged in
 if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
-    // Redirect to login page if not logged in
     header("Location: portal-login.html");
     exit;
 }
@@ -29,13 +24,12 @@ $password = $config['dbPassword'];
 function generateColors($count)
 {
     $colors = ['#FF6384', '#36A2EB', '#4BC0C0', '#FFCE56', '#9966FF', '#FF8A80', '#7CB342', '#FFD54F', '#64B5F6', '#BA68C8'];
-    // If there are more departments than predefined colors, generate random colors
     if ($count > count($colors)) {
         for ($i = count($colors); $i < $count; $i++) {
             $colors[] = '#' . str_pad(dechex(mt_rand(0, 0xFFFFFF)), 6, '0', STR_PAD_LEFT);
         }
     }
-    return array_slice($colors, 0, $count); // Return only the required number of colors
+    return array_slice($colors, 0, $count);
 }
 
 try {
@@ -56,11 +50,10 @@ try {
     }
 
     // Retrieve the username, role, and user ID from the session
-    $username = $_SESSION['username'] ?? 'Unknown'; // Fallback to 'Unknown' if not set
-    $userRole = $_SESSION['role'] ?? 'Unknown'; // Fallback to 'Unknown' if not set
-    $userId = $_SESSION['user_id'] ?? null; // User ID from session
+    $username = $_SESSION['username'] ?? 'Unknown';
+    $userRole = $_SESSION['role'] ?? 'Unknown';
+    $userId = $_SESSION['user_id'] ?? null;
 
-    // For admin
     // Fetch all departments assigned to the user
     $userDepartments = [];
     if ($userId) {
@@ -75,23 +68,22 @@ try {
         $userDepartments = $stmt->fetchAll(PDO::FETCH_COLUMN);
     }
 
-    // For manager
     // Fetch all departments assigned to the manager
     $managerDepartments = [];
     if ($userId && $userRole === 'Manager') {
         $stmt = $pdo->prepare("
-        SELECT d.name 
-        FROM user_departments ud
-        JOIN departments d ON ud.department_id = d.id
-        WHERE ud.user_id = :user_id
-    ");
+            SELECT d.name 
+            FROM user_departments ud
+            JOIN departments d ON ud.department_id = d.id
+            WHERE ud.user_id = :user_id
+        ");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
         $managerDepartments = $stmt->fetchAll(PDO::FETCH_COLUMN);
     }
 
-    // Fetch total tasks
     if (hasPermission('view_all_tasks')) {
+        // Fetch total tasks
         $stmt = $pdo->prepare("SELECT COUNT(*) as total_tasks FROM tasks");
         $stmt->execute();
         $totalTasks = $stmt->fetch(PDO::FETCH_ASSOC)['total_tasks'];
@@ -122,20 +114,19 @@ try {
             ) as avg_duration 
             FROM tasks 
             WHERE status = 'Completed on Time'"
-
         );
         $stmt->execute();
         $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
-        $avgDuration = round($avgDuration ?? 0, 1); // Default to 0 if null and round
+        $avgDuration = round($avgDuration ?? 0, 1);
 
         // Fetch tasks by department
         $stmt = $pdo->prepare("
-        SELECT d.name, COUNT(t.task_id) as task_count 
-        FROM tasks t
-        JOIN users u ON t.user_id = u.id
-        JOIN user_departments ud ON u.id = ud.user_id
-        JOIN departments d ON ud.department_id = d.id
-        GROUP BY d.name
+            SELECT d.name, COUNT(t.task_id) as task_count 
+            FROM tasks t
+            JOIN users u ON t.user_id = u.id
+            JOIN user_departments ud ON u.id = ud.user_id
+            JOIN departments d ON ud.department_id = d.id
+            GROUP BY d.name
         ");
         $stmt->execute();
         $tasksByDepartment = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -162,72 +153,103 @@ try {
 
         // Fetch task completion over time (grouped by month)
         $stmt = $pdo->prepare("
-        SELECT 
-        DATE_FORMAT(planned_finish_date, '%b') as month,
-        COUNT(*) as tasks_completed
-        FROM tasks
-        WHERE status = 'Completed on Time'
-        GROUP BY DATE_FORMAT(planned_finish_date, '%Y-%m')
-        ORDER BY MIN(planned_finish_date);
+            SELECT 
+                DATE_FORMAT(planned_finish_date, '%b') as month,
+                COUNT(*) as tasks_completed
+            FROM tasks
+            WHERE status = 'Completed on Time'
+            GROUP BY DATE_FORMAT(planned_finish_date, '%Y-%m')
+            ORDER BY MIN(planned_finish_date)
         ");
         $stmt->execute();
         $taskCompletionOverTime = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Fetch top performers
         $stmt = $pdo->prepare("
-        SELECT 
-        u.username, 
-        d.name as department, 
-        COUNT(t.task_id) as tasks_completed 
-        FROM tasks t
-        JOIN users u ON t.user_id = u.id
-        JOIN user_departments ud ON u.id = ud.user_id
-        JOIN departments d ON ud.department_id = d.id
-        WHERE t.status = 'Completed on Time'
-        GROUP BY u.username, d.name
-        ORDER BY tasks_completed DESC
-        LIMIT 3;
+            SELECT 
+                u.username, 
+                d.name as department, 
+                COUNT(t.task_id) as tasks_completed 
+            FROM tasks t
+            JOIN users u ON t.user_id = u.id
+            JOIN user_departments ud ON u.id = ud.user_id
+            JOIN departments d ON ud.department_id = d.id
+            WHERE t.status = 'Completed on Time'
+            GROUP BY u.username, d.name
+            ORDER BY tasks_completed DESC
+            LIMIT 3
         ");
         $stmt->execute();
         $topPerformers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Fetch`total projects
+        // Fetch total projects
         $stmt = $pdo->prepare("SELECT COUNT(*) as total_projects FROM projects");
         $stmt->execute();
         $totalProjects = $stmt->fetch(PDO::FETCH_ASSOC)['total_projects'];
-    }
 
-    if (hasPermission('view_department_tasks')) {
-        // For manager
+        // Fetch projects with "In Progress" status
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as in_progress_projects
+            FROM projects p
+            LEFT JOIN tasks t ON p.id = t.project_id
+            WHERE EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status IN ('In Progress', 'Completed on Time', 'Delayed Completion', 'Closed')
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t3
+                WHERE t3.project_id = p.id
+                AND t3.status NOT IN ('Completed on Time', 'Delayed Completion', 'Closed')
+            ) = 0
+        ");
+        $stmt->execute();
+        $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
+
+        // Fetch projects with "No Tasks" status
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) as no_tasks_projects
+            FROM projects p
+            LEFT JOIN tasks t ON p.id = t.project_id
+            WHERE t.project_id IS NULL
+        ");
+        $stmt->execute();
+        $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
+
+    } elseif (hasPermission('view_department_tasks')) {
         // Fetch total tasks for manager's departments
-        $stmt = $pdo->prepare("SELECT COUNT(*) as total_tasks 
-        FROM tasks t
-        JOIN user_departments ud ON t.user_id = ud.user_id
-        WHERE ud.department_id IN (
-            SELECT department_id 
-            FROM user_departments 
-            WHERE user_id = :user_id
-        )
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) as total_tasks 
+            FROM tasks t
+            JOIN user_departments ud ON t.user_id = ud.user_id
+            WHERE ud.department_id IN (
+                SELECT department_id 
+                FROM user_departments 
+                WHERE user_id = :user_id
+            )
         ");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
         $totalTasks = $stmt->fetch(PDO::FETCH_ASSOC)['total_tasks'];
 
         // Fetch tasks in progress for manager's departments
-        $stmt = $pdo->prepare("SELECT COUNT(*) as tasks_in_progress 
-        FROM tasks t
-        JOIN user_departments ud ON t.user_id = ud.user_id
-        WHERE t.status = 'In Progress' AND ud.department_id IN (
-            SELECT department_id 
-            FROM user_departments 
-            WHERE user_id = :user_id
-        )
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) as tasks_in_progress 
+            FROM tasks t
+            JOIN user_departments ud ON t.user_id = ud.user_id
+            WHERE t.status = 'In Progress' AND ud.department_id IN (
+                SELECT department_id 
+                FROM user_departments 
+                WHERE user_id = :user_id
+            )
         ");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
         $tasksInProgress = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_in_progress'];
 
-        // Fetch completed tasks for manager's departments
+        // Fetch tasks on hold for manager's departments
         $stmt = $pdo->prepare("
             SELECT COUNT(*) as tasks_on_hold 
             FROM tasks t
@@ -236,21 +258,22 @@ try {
                 SELECT department_id 
                 FROM user_departments 
                 WHERE user_id = :user_id
-            )");
+            )
+        ");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
         $tasksOnHold = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_on_hold'];
 
         // Fetch delayed tasks for manager's departments
         $stmt = $pdo->prepare("
-        SELECT COUNT(*) as delayed_tasks 
-        FROM tasks t
-        JOIN user_departments ud ON t.user_id = ud.user_id
-        WHERE t.status = 'Delayed Completion' AND ud.department_id IN (
-            SELECT department_id 
-            FROM user_departments 
-            WHERE user_id = :user_id
-        )
+            SELECT COUNT(*) as delayed_tasks 
+            FROM tasks t
+            JOIN user_departments ud ON t.user_id = ud.user_id
+            WHERE t.status = 'Delayed Completion' AND ud.department_id IN (
+                SELECT department_id 
+                FROM user_departments 
+                WHERE user_id = :user_id
+            )
         ");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
@@ -258,17 +281,17 @@ try {
 
         // Fetch tasks by department for manager's departments
         $stmt = $pdo->prepare("
-        SELECT d.name, COUNT(t.task_id) as task_count 
-        FROM tasks t
-        JOIN users u ON t.user_id = u.id
-        JOIN user_departments ud ON u.id = ud.user_id
-        JOIN departments d ON ud.department_id = d.id
-        WHERE ud.department_id IN (
-            SELECT department_id 
-            FROM user_departments 
-            WHERE user_id = :user_id
-        )
-        GROUP BY d.name
+            SELECT d.name, COUNT(t.task_id) as task_count 
+            FROM tasks t
+            JOIN users u ON t.user_id = u.id
+            JOIN user_departments ud ON u.id = ud.user_id
+            JOIN departments d ON ud.department_id = d.id
+            WHERE ud.department_id IN (
+                SELECT department_id 
+                FROM user_departments 
+                WHERE user_id = :user_id
+            )
+            GROUP BY d.name
         ");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
@@ -314,7 +337,7 @@ try {
                 WHERE user_id = :user_id
             )
             GROUP BY DATE_FORMAT(planned_finish_date, '%Y-%m')
-            ORDER BY planned_finish_date;
+            ORDER BY planned_finish_date
         ");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
@@ -361,13 +384,12 @@ try {
                 WHERE user_id = :user_id
             )
         ");
-
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
         $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
-        $avgDuration = round($avgDuration ?? 0, 1); // Default to 0 if null and round
+        $avgDuration = round($avgDuration ?? 0, 1);
 
-        // Fetch total projects for departments wise
+        // Fetch total projects for departments
         $stmt = $pdo->prepare("
             SELECT COUNT(DISTINCT p.id) as total_projects 
             FROM projects p
@@ -382,10 +404,53 @@ try {
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
         $totalProjects = $stmt->fetch(PDO::FETCH_ASSOC)['total_projects'];
-    }
 
-    // For User
-    if (hasPermission('view_own_tasks')) {
+        // Fetch projects with "In Progress" status for departments
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as in_progress_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            JOIN user_departments ud ON t.user_id = ud.user_id
+            WHERE ud.department_id IN (
+                SELECT department_id 
+                FROM user_departments 
+                WHERE user_id = :user_id
+            )
+            AND EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status IN ('In Progress', 'Completed on Time', 'Delayed Completion', 'Closed')
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t3
+                WHERE t3.project_id = p.id
+                AND t3.status NOT IN ('Completed on Time', 'Delayed Completion', 'Closed')
+            ) = 0
+        ");
+        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
+
+        // Fetch projects with "No Tasks" status for departments
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as no_tasks_projects
+            FROM projects p
+            LEFT JOIN tasks t ON p.id = t.project_id
+            JOIN user_departments ud ON t.user_id = ud.user_id
+            WHERE ud.department_id IN (
+                SELECT department_id 
+                FROM user_departments 
+                WHERE user_id = :user_id
+            )
+            AND t.project_id IS NULL
+        ");
+        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
+
+    } elseif (hasPermission('view_own_tasks')) {
         // Fetch total tasks for the user
         $stmt = $pdo->prepare("SELECT COUNT(*) as total_tasks FROM tasks WHERE user_id = :user_id");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
@@ -398,7 +463,7 @@ try {
         $stmt->execute();
         $tasksInProgress = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_in_progress'];
 
-        // Fetch completed tasks for the user
+        // Fetch tasks on hold for the user
         $stmt = $pdo->prepare("SELECT COUNT(*) as tasks_on_hold FROM tasks WHERE user_id = :user_id AND status = 'Hold'");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
@@ -431,14 +496,14 @@ try {
 
         // Fetch task completion over time for the user
         $stmt = $pdo->prepare("
-        SELECT 
-            DATE_FORMAT(planned_finish_date, '%b') as month,
-            COUNT(*) as tasks_completed
-        FROM tasks
-        WHERE status = 'Completed on Time' AND user_id = :user_id
-        GROUP BY DATE_FORMAT(planned_finish_date, '%Y-%m')
-        ORDER BY planned_finish_date;
-    ");
+            SELECT 
+                DATE_FORMAT(planned_finish_date, '%b') as month,
+                COUNT(*) as tasks_completed
+            FROM tasks
+            WHERE status = 'Completed on Time' AND user_id = :user_id
+            GROUP BY DATE_FORMAT(planned_finish_date, '%Y-%m')
+            ORDER BY planned_finish_date
+        ");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
         $taskCompletionOverTime = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -456,7 +521,6 @@ try {
             WHERE status = 'Completed on Time' 
             AND user_id = :user_id
         ");
-
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
         $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
@@ -464,20 +528,54 @@ try {
 
         // Fetch total projects for the user
         $stmt = $pdo->prepare("
-                SELECT COUNT(DISTINCT p.id) as total_projects 
-                FROM projects p
-                JOIN tasks t ON p.id = t.project_id
-                WHERE t.user_id = :user_id
-            ");
+            SELECT COUNT(DISTINCT p.id) as total_projects 
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            WHERE t.user_id = :user_id
+        ");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
         $totalProjects = $stmt->fetch(PDO::FETCH_ASSOC)['total_projects'];
+
+        // Fetch projects with "In Progress" status for the user
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as in_progress_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            WHERE t.user_id = :user_id
+            AND EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status IN ('In Progress', 'Completed on Time', 'Delayed Completion', 'Closed')
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t3
+                WHERE t3.project_id = p.id
+                AND t3.status NOT IN ('Completed on Time', 'Delayed Completion', 'Closed')
+            ) = 0
+        ");
+        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
+
+        // Fetch projects with "No Tasks" status for the user
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as no_tasks_projects
+            FROM projects p
+            LEFT JOIN tasks t ON p.id = t.project_id
+            WHERE t.user_id = :user_id
+            AND t.project_id IS NULL
+        ");
+        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
     }
 
-    // Optional: Session timeout settings
+    // Session timeout settings
     $timeout_duration = 1200;
     if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeout_duration) {
-        // If the session is expired, destroy it and redirect to login page
         session_unset();
         session_destroy();
         header("Location: portal-login.html");
@@ -493,13 +591,11 @@ try {
 ?>
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard</title>
     <link rel="icon" type="image/png" sizes="56x56" href="images/logo/logo-2.1.ico" />
-    <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body {
@@ -516,7 +612,6 @@ try {
             display: flex;
             min-height: 100vh;
             width: 100%;
-            /* Ensure full viewport width */
         }
 
         .sidebar {
@@ -525,7 +620,6 @@ try {
             color: white;
             padding: 20px;
             flex-shrink: 0;
-            /* Prevent sidebar from shrinking */
         }
 
         .sidebar a {
@@ -613,11 +707,9 @@ try {
             display: flex;
             align-items: center;
             padding: 10px 20px;
-            /* Keep vertical padding 10px, horizontal matches dashboard-content */
             background-color: #ffffff;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
             border-radius: 10px;
-            /* Remove width: 100% and let it inherit from parent */
         }
 
         .chart-canvas {
@@ -652,7 +744,6 @@ try {
             padding: 20px;
         }
 
-        /* Middle-align only metric cards (non-chart cards) */
         .card.metric-card .card-body {
             display: flex;
             flex-direction: column;
@@ -663,13 +754,15 @@ try {
         }
     </style>
 </head>
-
 <body>
     <div class="dashboard-container">
         <!-- Sidebar -->
         <div class="sidebar">
             <h3>TMS</h3>
             <a href="tasks.php">Tasks</a>
+            <?php if (hasPermission('view_projects')): ?>
+                <a href="projects.php">Projects</a>
+            <?php endif; ?>
             <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
                 <a href="task-actions.php">Task Actions</a>
             <?php endif; ?>
@@ -691,20 +784,15 @@ try {
         <div class="main-content">
             <!-- Navbar -->
             <div class="navbar">
-                <!-- Logo Container -->
                 <div class="d-flex align-items-center me-3">
                     <img src="images/logo/logo.webp" alt="Logo" class="logo" style="width: auto; height: 80px;">
                 </div>
-
-                <!-- User Info -->
-                <div class="user-info me-3 ms-auto"> <!-- Added ms-auto here -->
+                <div class="user-info me-3 ms-auto">
                     <p class="mb-0">Logged in as: <strong><?= htmlspecialchars($username) ?></strong></p>
                     <p class="mb-0">Departments:
                         <strong><?= !empty($userDepartments) ? htmlspecialchars(implode(', ', $userDepartments)) : 'None' ?></strong>
                     </p>
                 </div>
-
-                <!-- Logout Button -->
                 <button class="logout-btn" onclick="window.location.href='logout.php'">Log Out</button>
             </div>
 
@@ -713,7 +801,7 @@ try {
                 <!-- Row 1: Key Metrics -->
                 <div class="row mb-4">
                     <!-- Total Projects -->
-                    <div class="col-md-3">
+                    <div class="col-md-4">
                         <div class="card metric-card h-100">
                             <div class="card-body">
                                 <h5 class="card-title">Total Projects</h5>
@@ -722,8 +810,28 @@ try {
                             </div>
                         </div>
                     </div>
-                    <!-- Open Tickets -->
-                    <div class="col-md-2">
+                    <!-- Projects In Progress -->
+                    <div class="col-md-4">
+                        <div class="card metric-card h-100">
+                            <div class="card-body">
+                                <h5 class="card-title">Projects In Progress</h5>
+                                <p class="card-text display-4"><?= $inProgressProjects ?></p>
+                                <p class="text-muted">Active</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Projects with No Tasks -->
+                    <div class="col-md-4">
+                        <div class="card metric-card h-100">
+                            <div class="card-body">
+                                <h5 class="card-title">Projects with No Tasks</h5>
+                                <p class="card-text display-4"><?= $noTasksProjects ?></p>
+                                <p class="text-muted">Not Started</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Tasks -->
+                    <div class="col-md-3 mt-4">
                         <div class="card metric-card h-100">
                             <div class="card-body">
                                 <h5 class="card-title">Tasks</h5>
@@ -732,9 +840,8 @@ try {
                             </div>
                         </div>
                     </div>
-
                     <!-- Tasks in Progress -->
-                    <div class="col-md-2">
+                    <div class="col-md-3 mt-4">
                         <div class="card metric-card h-100">
                             <div class="card-body">
                                 <h5 class="card-title">Tasks in Progress</h5>
@@ -743,9 +850,8 @@ try {
                             </div>
                         </div>
                     </div>
-
-                    <!-- Tasks on Hold-->
-                    <div class="col-md-2">
+                    <!-- Tasks on Hold -->
+                    <div class="col-md-3 mt-4">
                         <div class="card metric-card h-100">
                             <div class="card-body">
                                 <h5 class="card-title">Tasks on Hold</h5>
@@ -754,9 +860,8 @@ try {
                             </div>
                         </div>
                     </div>
-
                     <!-- Delayed Tasks -->
-                    <div class="col-md-3">
+                    <div class="col-md-3 mt-4">
                         <div class="card metric-card h-100">
                             <div class="card-body">
                                 <h5 class="card-title">Delayed Tasks</h5>
@@ -780,7 +885,6 @@ try {
                             </div>
                         </div>
                     </div>
-
                     <!-- Task Completion Over Time -->
                     <div class="col-md-6">
                         <div class="card h-100">
@@ -806,7 +910,6 @@ try {
                             </div>
                         </div>
                     </div>
-
                     <!-- Tasks by Department (Only for Admin and Manager) -->
                     <?php if (hasPermission('dashboard_tasks')): ?>
                         <div class="col-md-4">
@@ -820,7 +923,6 @@ try {
                             </div>
                         </div>
                     <?php endif; ?>
-
                     <!-- User Performance (Only for Admin and Manager) -->
                     <?php if (hasPermission('dashboard_tasks')): ?>
                         <div class="col-md-4">
@@ -844,10 +946,8 @@ try {
         </div>
 
         <!-- Modals for Task Status -->
-
         <!-- Completed Tasks Modal -->
-        <div class="modal fade" id="completedTasksModal" tabindex="-1" aria-labelledby="completedTasksModalLabel"
-            aria-hidden="true">
+        <div class="modal fade" id="completedTasksModal" tabindex="-1" aria-labelledby="completedTasksModalLabel" aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -880,8 +980,7 @@ try {
         </div>
 
         <!-- Assigned Tasks Modal -->
-        <div class="modal fade" id="pendingTasksModal" tabindex="-1" aria-labelledby="pendingTasksModalLabel"
-            aria-hidden="true">
+        <div class="modal fade" id="pendingTasksModal" tabindex="-1" aria-labelledby="pendingTasksModalLabel" aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -914,8 +1013,7 @@ try {
         </div>
 
         <!-- In Progress Tasks Modal -->
-        <div class="modal fade" id="inProgressTasksModal" tabindex="-1" aria-labelledby="inProgressTasksModalLabel"
-            aria-hidden="true">
+        <div class="modal fade" id="inProgressTasksModal" tabindex="-1" aria-labelledby="inProgressTasksModalLabel" aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -948,8 +1046,7 @@ try {
         </div>
 
         <!-- Delayed Tasks Modal -->
-        <div class="modal fade" id="delayedTasksModal" tabindex="-1" aria-labelledby="delayedTasksModalLabel"
-            aria-hidden="true">
+        <div class="modal fade" id="delayedTasksModal" tabindex="-1" aria-labelledby="delayedTasksModalLabel" aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -982,8 +1079,7 @@ try {
         </div>
 
         <!-- Hold Tasks Modal -->
-        <div class="modal fade" id="holdTasksModal" tabindex="-1" aria-labelledby="holdTasksModalLabel"
-            aria-hidden="true">
+        <div class="modal fade" id="holdTasksModal" tabindex="-1" aria-labelledby="holdTasksModalLabel" aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1015,9 +1111,8 @@ try {
             </div>
         </div>
 
-        <!-- Cancelled tasks modal -->
-        <div class="modal fade" id="cancelledTasksModal" tabindex="-1" aria-labelledby="cancelledTasksModalLabel"
-            aria-hidden="true">
+        <!-- Cancelled Tasks Modal -->
+        <div class="modal fade" id="cancelledTasksModal" tabindex="-1" aria-labelledby="cancelledTasksModalLabel" aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1049,9 +1144,8 @@ try {
             </div>
         </div>
 
-        <!-- Reinstated tasks modal -->
-        <div class="modal fade" id="reinstatedTasksModal" tabindex="-1" aria-labelledby="reinstatedTasksModalLabel"
-            aria-hidden="true">
+        <!-- Reinstated Tasks Modal -->
+        <div class="modal fade" id="reinstatedTasksModal" tabindex="-1" aria-labelledby="reinstatedTasksModalLabel" aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1083,9 +1177,8 @@ try {
             </div>
         </div>
 
-        <!-- Reassigned tasks modal -->
-        <div class="modal fade" id="reassignedTasksModal" tabindex="-1" aria-labelledby="reassignedTasksModalLabel"
-            aria-hidden="true">
+        <!-- Reassigned Tasks Modal -->
+        <div class="modal fade" id="reassignedTasksModal" tabindex="-1" aria-labelledby="reassignedTasksModalLabel" aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1117,9 +1210,8 @@ try {
             </div>
         </div>
 
-        <!-- Closed tasks modal -->
-        <div class="modal fade" id="closedTasksModal" tabindex="-1" aria-labelledby="closedTasksModalLabel"
-            aria-hidden="true">
+        <!-- Closed Tasks Modal -->
+        <div class="modal fade" id="closedTasksModal" tabindex="-1" aria-labelledby="closedTasksModalLabel" aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1153,10 +1245,8 @@ try {
 
         <!-- Bootstrap JS (with Popper.js) -->
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
         <!-- Chart.js -->
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
         <script>
             const statusMapping = {
                 'Assigned': 'Assigned',
@@ -1164,6 +1254,7 @@ try {
                 'Completed': 'Completed on Time',
                 'Delayed': 'Delayed Completion'
             };
+
             // Task Distribution Chart (Pie Chart)
             const taskDistributionChart = new Chart(document.getElementById('taskDistributionChart'), {
                 type: 'pie',
@@ -1193,15 +1284,15 @@ try {
                             <?= $taskDistribution['closed'] ?>
                         ],
                         backgroundColor: [
-                            '#FF0000', // Red for Assigned
-                            '#0000FF', // Blue for In Progress
-                            '#800080', // Teal for Hold
-                            '#EE2C2C', // Yellow for Cancelled
-                            '#660000', // Purple for Reinstated
-                            '#FF6600', // Coral for Reassigned
-                            '#00CD00', // Green for Completed on Time
-                            '#FFD54F', // Amber for Delayed Completion
-                            '#64B5F6'  // Light Blue for Closed
+                            '#FF0000',
+                            '#0000FF',
+                            '#800080',
+                            '#EE2C2C',
+                            '#660000',
+                            '#FF6600',
+                            '#00CD00',
+                            '#FFD54F',
+                            '#64B5F6'
                         ],
                         hoverOffset: 4
                     }]
@@ -1305,7 +1396,7 @@ try {
                 }
 
                 const tableBody = document.getElementById(tableBodyId);
-                tableBody.innerHTML = ''; // Clear existing rows
+                tableBody.innerHTML = '';
 
                 if (data.length === 0) {
                     tableBody.innerHTML = '<tr><td colspan="5" class="text-center">No tasks found.</td></tr>';
@@ -1329,13 +1420,12 @@ try {
                         `;
                         tableBody.appendChild(row);
                     });
-
                 }
 
-                // Show the modal
                 const modal = new bootstrap.Modal(document.getElementById(modalId));
                 modal.show();
             }
+
             // Task Completion Over Time (Line Chart)
             const taskCompletionChart = new Chart(document.getElementById('taskCompletionChart'), {
                 type: 'line',
@@ -1350,8 +1440,8 @@ try {
                     }]
                 },
                 options: {
-                    responsive: true, // Make the chart responsive
-                    maintainAspectRatio: false, // Allow custom sizing
+                    responsive: true,
+                    maintainAspectRatio: false,
                     plugins: {
                         legend: {
                             position: 'bottom',
@@ -1404,5 +1494,4 @@ try {
             <?php endif; ?>
         </script>
 </body>
-
 </html>
