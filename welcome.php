@@ -88,20 +88,98 @@ try {
         $stmt->execute();
         $totalTasks = $stmt->fetch(PDO::FETCH_ASSOC)['total_tasks'];
 
-        // Fetch tasks in progress
-        $stmt = $pdo->prepare("SELECT COUNT(*) as tasks_in_progress FROM tasks WHERE status = 'In Progress'");
-        $stmt->execute();
-        $tasksInProgress = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_in_progress'];
+        // Fetch active task counts (Assigned, In Progress, Reassigned)
+        $activeTaskStatuses = [
+            'Assigned' => 'assigned_tasks',
+            'In Progress' => 'in_progress_tasks',
+            'Reassigned' => 'reassigned_tasks'
+        ];
+        $taskCounts = [];
+        foreach ($activeTaskStatuses as $status => $key) {
+            $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM tasks WHERE status = :status");
+            $stmt->bindParam(':status', $status, PDO::PARAM_STR);
+            $stmt->execute();
+            $taskCounts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+        }
 
-        // Fetch tasks on hold
-        $stmt = $pdo->prepare("SELECT COUNT(*) as tasks_on_hold FROM tasks WHERE status = 'Hold'");
-        $stmt->execute();
-        $tasksOnHold = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_on_hold'];
+        // Fetch inactive task counts (Completed on Time, Delayed Completion, Closed, Cancelled, Hold, Reinstated)
+        $inactiveTaskStatuses = [
+            'Completed on Time' => 'completed_tasks',
+            'Delayed Completion' => 'delayed_tasks',
+            'Closed' => 'closed_tasks',
+            'Cancelled' => 'cancelled_tasks',
+            'Hold' => 'hold_tasks',
+            'Reinstated' => 'reinstated_tasks'
+        ];
+        foreach ($inactiveTaskStatuses as $status => $key) {
+            $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM tasks WHERE status = :status");
+            $stmt->bindParam(':status', $status, PDO::PARAM_STR);
+            $stmt->execute();
+            $taskCounts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+        }
 
-        // Fetch delayed tasks
-        $stmt = $pdo->prepare("SELECT COUNT(*) as delayed_tasks FROM tasks WHERE status = 'Delayed Completion'");
+        // Fetch active project counts
+        // Assigned Projects: All tasks in Assigned/Reassigned
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as assigned_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status NOT IN ('Assigned', 'Reassigned')
+            )
+        ");
         $stmt->execute();
-        $delayedTasks = $stmt->fetch(PDO::FETCH_ASSOC)['delayed_tasks'];
+        $assignedProjects = $stmt->fetch(PDO::FETCH_ASSOC)['assigned_projects'];
+
+        // In Progress Projects: At least one task in In Progress, none in completed/inactive statuses
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as in_progress_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            WHERE EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status = 'In Progress'
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t3
+                WHERE t3.project_id = p.id
+                AND t3.status IN ('Completed on Time', 'Delayed Completion', 'Closed', 'Cancelled', 'Hold', 'Reinstated')
+            )
+        ");
+        $stmt->execute();
+        $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
+
+        // Fetch inactive project counts
+        // Completed Projects: All tasks in completed/inactive statuses
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as completed_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status IN ('Assigned', 'In Progress', 'Reassigned')
+            )
+        ");
+        $stmt->execute();
+        $completedProjects = $stmt->fetch(PDO::FETCH_ASSOC)['completed_projects'];
+
+        // No Tasks Projects
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as no_tasks_projects
+            FROM projects p
+            LEFT JOIN tasks t ON p.id = t.project_id
+            WHERE t.project_id IS NULL
+        ");
+        $stmt->execute();
+        $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
 
         // Fetch average task duration
         $stmt = $pdo->prepare(
@@ -182,42 +260,6 @@ try {
         $stmt->execute();
         $topPerformers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Fetch total projects
-        $stmt = $pdo->prepare("SELECT COUNT(*) as total_projects FROM projects");
-        $stmt->execute();
-        $totalProjects = $stmt->fetch(PDO::FETCH_ASSOC)['total_projects'];
-
-        // Fetch projects with "In Progress" status
-        $stmt = $pdo->prepare("
-            SELECT COUNT(DISTINCT p.id) as in_progress_projects
-            FROM projects p
-            LEFT JOIN tasks t ON p.id = t.project_id
-            WHERE EXISTS (
-                SELECT 1
-                FROM tasks t2
-                WHERE t2.project_id = p.id
-                AND t2.status IN ('In Progress', 'Completed on Time', 'Delayed Completion', 'Closed')
-            )
-            AND NOT EXISTS (
-                SELECT 1
-                FROM tasks t3
-                WHERE t3.project_id = p.id
-                AND t3.status NOT IN ('Completed on Time', 'Delayed Completion', 'Closed')
-            ) = 0
-        ");
-        $stmt->execute();
-        $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
-
-        // Fetch projects with "No Tasks" status
-        $stmt = $pdo->prepare("
-            SELECT COUNT(*) as no_tasks_projects
-            FROM projects p
-            LEFT JOIN tasks t ON p.id = t.project_id
-            WHERE t.project_id IS NULL
-        ");
-        $stmt->execute();
-        $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
-
     } elseif (hasPermission('view_department_tasks')) {
         // Fetch total tasks for manager's departments
         $stmt = $pdo->prepare("
@@ -234,42 +276,136 @@ try {
         $stmt->execute();
         $totalTasks = $stmt->fetch(PDO::FETCH_ASSOC)['total_tasks'];
 
-        // Fetch tasks in progress for manager's departments
-        $stmt = $pdo->prepare("
-            SELECT COUNT(*) as tasks_in_progress 
-            FROM tasks t
-            JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE t.status = 'In Progress' AND ud.department_id IN (
-                SELECT department_id 
-                FROM user_departments 
-                WHERE user_id = :user_id
-            )
-        ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $tasksInProgress = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_in_progress'];
+        // Fetch active task counts for manager's departments
+        $activeTaskStatuses = [
+            'Assigned' => 'assigned_tasks',
+            'In Progress' => 'in_progress_tasks',
+            'Reassigned' => 'reassigned_tasks'
+        ];
+        $taskCounts = [];
+        foreach ($activeTaskStatuses as $status => $key) {
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*) as count 
+                FROM tasks t
+                JOIN user_departments ud ON t.user_id = ud.user_id
+                WHERE t.status = :status
+                AND ud.department_id IN (
+                    SELECT department_id 
+                    FROM user_departments 
+                    WHERE user_id = :user_id
+                )
+            ");
+            $stmt->bindParam(':status', $status, PDO::PARAM_STR);
+            $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+            $stmt->execute();
+            $taskCounts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+        }
 
-        // Fetch tasks on hold for manager's departments
-        $stmt = $pdo->prepare("
-            SELECT COUNT(*) as tasks_on_hold 
-            FROM tasks t
-            JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE t.status = 'Hold' AND ud.department_id IN (
-                SELECT department_id 
-                FROM user_departments 
-                WHERE user_id = :user_id
-            )
-        ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $tasksOnHold = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_on_hold'];
+        // Fetch inactive task counts for manager's departments
+        $inactiveTaskStatuses = [
+            'Completed on Time' => 'completed_tasks',
+            'Delayed Completion' => 'delayed_tasks',
+            'Closed' => 'closed_tasks',
+            'Cancelled' => 'cancelled_tasks',
+            'Hold' => 'hold_tasks',
+            'Reinstated' => 'reinstated_tasks'
+        ];
+        foreach ($inactiveTaskStatuses as $status => $key) {
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*) as count 
+                FROM tasks t
+                JOIN user_departments ud ON t.user_id = ud.user_id
+                WHERE t.status = :status
+                AND ud.department_id IN (
+                    SELECT department_id 
+                    FROM user_departments 
+                    WHERE user_id = :user_id
+                )
+            ");
+            $stmt->bindParam(':status', $status, PDO::PARAM_STR);
+            $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+            $stmt->execute();
+            $taskCounts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+        }
 
-        // Fetch delayed tasks for manager's departments
+        // Fetch active project counts for manager's departments
         $stmt = $pdo->prepare("
-            SELECT COUNT(*) as delayed_tasks 
-            FROM tasks t
+            SELECT COUNT(DISTINCT p.id) as assigned_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
             JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE t.status = 'Delayed Completion' AND ud.department_id IN (
+            WHERE ud.department_id IN (
+                SELECT department_id 
+                FROM user_departments 
+                WHERE user_id = :user_id
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status NOT IN ('Assigned', 'Reassigned')
+            )
+        ");
+        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $assignedProjects = $stmt->fetch(PDO::FETCH_ASSOC)['assigned_projects'];
+
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as in_progress_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            JOIN user_departments ud ON t.user_id = ud.user_id
+            WHERE ud.department_id IN (
+                SELECT department_id 
+                FROM user_departments 
+                WHERE user_id = :user_id
+            )
+            AND EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status = 'In Progress'
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t3
+                WHERE t3.project_id = p.id
+                AND t3.status IN ('Completed on Time', 'Delayed Completion', 'Closed', 'Cancelled', 'Hold', 'Reinstated')
+            )
+        ");
+        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
+
+        // Fetch inactive project counts for manager's departments
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as completed_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            JOIN user_departments ud ON t.user_id = ud.user_id
+            WHERE ud.department_id IN (
+                SELECT department_id 
+                FROM user_departments 
+                WHERE user_id = :user_id
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status IN ('Assigned', 'In Progress', 'Reassigned')
+            )
+        ");
+        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $completedProjects = $stmt->fetch(PDO::FETCH_ASSOC)['completed_projects'];
+
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as no_tasks_projects
+            FROM projects p
+            LEFT JOIN tasks t ON p.id = t.project_id
+            JOIN user_departments ud ON t.user_id = ud.user_id
+            WHERE t.project_id IS NULL
+            AND ud.department_id IN (
                 SELECT department_id 
                 FROM user_departments 
                 WHERE user_id = :user_id
@@ -277,7 +413,7 @@ try {
         ");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
-        $delayedTasks = $stmt->fetch(PDO::FETCH_ASSOC)['delayed_tasks'];
+        $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
 
         // Fetch tasks by department for manager's departments
         $stmt = $pdo->prepare("
@@ -389,67 +525,6 @@ try {
         $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
         $avgDuration = round($avgDuration ?? 0, 1);
 
-        // Fetch total projects for departments
-        $stmt = $pdo->prepare("
-            SELECT COUNT(DISTINCT p.id) as total_projects 
-            FROM projects p
-            JOIN tasks t ON p.id = t.project_id
-            JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE ud.department_id IN (
-                SELECT department_id 
-                FROM user_departments 
-                WHERE user_id = :user_id
-            )
-        ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $totalProjects = $stmt->fetch(PDO::FETCH_ASSOC)['total_projects'];
-
-        // Fetch projects with "In Progress" status for departments
-        $stmt = $pdo->prepare("
-            SELECT COUNT(DISTINCT p.id) as in_progress_projects
-            FROM projects p
-            JOIN tasks t ON p.id = t.project_id
-            JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE ud.department_id IN (
-                SELECT department_id 
-                FROM user_departments 
-                WHERE user_id = :user_id
-            )
-            AND EXISTS (
-                SELECT 1
-                FROM tasks t2
-                WHERE t2.project_id = p.id
-                AND t2.status IN ('In Progress', 'Completed on Time', 'Delayed Completion', 'Closed')
-            )
-            AND NOT EXISTS (
-                SELECT 1
-                FROM tasks t3
-                WHERE t3.project_id = p.id
-                AND t3.status NOT IN ('Completed on Time', 'Delayed Completion', 'Closed')
-            ) = 0
-        ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
-
-        // Fetch projects with "No Tasks" status for departments
-        $stmt = $pdo->prepare("
-            SELECT COUNT(DISTINCT p.id) as no_tasks_projects
-            FROM projects p
-            LEFT JOIN tasks t ON p.id = t.project_id
-            JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE ud.department_id IN (
-                SELECT department_id 
-                FROM user_departments 
-                WHERE user_id = :user_id
-            )
-            AND t.project_id IS NULL
-        ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
-
     } elseif (hasPermission('view_own_tasks')) {
         // Fetch total tasks for the user
         $stmt = $pdo->prepare("SELECT COUNT(*) as total_tasks FROM tasks WHERE user_id = :user_id");
@@ -457,23 +532,114 @@ try {
         $stmt->execute();
         $totalTasks = $stmt->fetch(PDO::FETCH_ASSOC)['total_tasks'];
 
-        // Fetch tasks in progress for the user
-        $stmt = $pdo->prepare("SELECT COUNT(*) as tasks_in_progress FROM tasks WHERE user_id = :user_id AND status = 'In Progress'");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $tasksInProgress = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_in_progress'];
+        // Fetch active task counts for the user
+        $activeTaskStatuses = [
+            'Assigned' => 'assigned_tasks',
+            'In Progress' => 'in_progress_tasks',
+            'Reassigned' => 'reassigned_tasks'
+        ];
+        $taskCounts = [];
+        foreach ($activeTaskStatuses as $status => $key) {
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*) as count 
+                FROM tasks 
+                WHERE user_id = :user_id 
+                AND status = :status
+            ");
+            $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+            $stmt->bindParam(':status', $status, PDO::PARAM_STR);
+            $stmt->execute();
+            $taskCounts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+        }
 
-        // Fetch tasks on hold for the user
-        $stmt = $pdo->prepare("SELECT COUNT(*) as tasks_on_hold FROM tasks WHERE user_id = :user_id AND status = 'Hold'");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $tasksOnHold = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_on_hold'];
+        // Fetch inactive task counts for the user
+        $inactiveTaskStatuses = [
+            'Completed on Time' => 'completed_tasks',
+            'Delayed Completion' => 'delayed_tasks',
+            'Closed' => 'closed_tasks',
+            'Cancelled' => 'cancelled_tasks',
+            'Hold' => 'hold_tasks',
+            'Reinstated' => 'reinstated_tasks'
+        ];
+        foreach ($inactiveTaskStatuses as $status => $key) {
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*) as count 
+                FROM tasks 
+                WHERE user_id = :user_id 
+                AND status = :status
+            ");
+            $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+            $stmt->bindParam(':status', $status, PDO::PARAM_STR);
+            $stmt->execute();
+            $taskCounts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+        }
 
-        // Fetch delayed tasks for the user
-        $stmt = $pdo->prepare("SELECT COUNT(*) as delayed_tasks FROM tasks WHERE user_id = :user_id AND status = 'Delayed Completion'");
+        // Fetch active project counts for the user
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as assigned_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            WHERE t.user_id = :user_id
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status NOT IN ('Assigned', 'Reassigned')
+            )
+        ");
         $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
-        $delayedTasks = $stmt->fetch(PDO::FETCH_ASSOC)['delayed_tasks'];
+        $assignedProjects = $stmt->fetch(PDO::FETCH_ASSOC)['assigned_projects'];
+
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as in_progress_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            WHERE t.user_id = :user_id
+            AND EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status = 'In Progress'
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t3
+                WHERE t3.project_id = p.id
+                AND t3.status IN ('Completed on Time', 'Delayed Completion', 'Closed', 'Cancelled', 'Hold', 'Reinstated')
+            )
+        ");
+        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
+
+        // Fetch inactive project counts for the user
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as completed_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            WHERE t.user_id = :user_id
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status IN ('Assigned', 'In Progress', 'Reassigned')
+            )
+        ");
+        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $completedProjects = $stmt->fetch(PDO::FETCH_ASSOC)['completed_projects'];
+
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as no_tasks_projects
+            FROM projects p
+            LEFT JOIN tasks t ON p.id = t.project_id
+            WHERE t.project_id IS NULL
+            AND t.user_id = :user_id
+        ");
+        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
 
         // Fetch task distribution by status for the user
         $stmt = $pdo->prepare("
@@ -525,52 +691,6 @@ try {
         $stmt->execute();
         $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
         $avgDuration = round($avgDuration ?? 0, 1);
-
-        // Fetch total projects for the user
-        $stmt = $pdo->prepare("
-            SELECT COUNT(DISTINCT p.id) as total_projects 
-            FROM projects p
-            JOIN tasks t ON p.id = t.project_id
-            WHERE t.user_id = :user_id
-        ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $totalProjects = $stmt->fetch(PDO::FETCH_ASSOC)['total_projects'];
-
-        // Fetch projects with "In Progress" status for the user
-        $stmt = $pdo->prepare("
-            SELECT COUNT(DISTINCT p.id) as in_progress_projects
-            FROM projects p
-            JOIN tasks t ON p.id = t.project_id
-            WHERE t.user_id = :user_id
-            AND EXISTS (
-                SELECT 1
-                FROM tasks t2
-                WHERE t2.project_id = p.id
-                AND t2.status IN ('In Progress', 'Completed on Time', 'Delayed Completion', 'Closed')
-            )
-            AND NOT EXISTS (
-                SELECT 1
-                FROM tasks t3
-                WHERE t3.project_id = p.id
-                AND t3.status NOT IN ('Completed on Time', 'Delayed Completion', 'Closed')
-            ) = 0
-        ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
-
-        // Fetch projects with "No Tasks" status for the user
-        $stmt = $pdo->prepare("
-            SELECT COUNT(DISTINCT p.id) as no_tasks_projects
-            FROM projects p
-            LEFT JOIN tasks t ON p.id = t.project_id
-            WHERE t.user_id = :user_id
-            AND t.project_id IS NULL
-        ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
     }
 
     // Session timeout settings
@@ -591,6 +711,7 @@ try {
 ?>
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -752,8 +873,16 @@ try {
             text-align: center;
             height: 100%;
         }
+
+        .section-header {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #002c5f;
+            margin-bottom: 1rem;
+        }
     </style>
 </head>
+
 <body>
     <div class="dashboard-container">
         <!-- Sidebar -->
@@ -798,82 +927,141 @@ try {
 
             <!-- Dashboard Content -->
             <div class="dashboard-content">
-                <!-- Row 1: Key Metrics -->
-                <div class="row mb-4">
-                    <!-- Total Projects -->
-                    <div class="col-md-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Total Projects</h5>
-                                <p class="card-text display-4"><?= $totalProjects ?></p>
-                                <p class="text-muted">Created</p>
+                <!-- Active Metrics Section -->
+                <div class="mb-4">
+                    <h2 class="section-header">Active Metrics</h2>
+                    <div class="row">
+                        <!-- Assigned Projects -->
+                        <div class="col-md-2 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Assigned Projects</h5>
+                                    <p class="card-text display-4"><?= $assignedProjects ?></p>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Projects In Progress -->
-                    <div class="col-md-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Projects In Progress</h5>
-                                <p class="card-text display-4"><?= $inProgressProjects ?></p>
-                                <p class="text-muted">Active</p>
+                        <!-- In Progress Projects -->
+                        <div class="col-md-2 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">In Progress Projects</h5>
+                                    <p class="card-text display-4"><?= $inProgressProjects ?></p>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Projects with No Tasks -->
-                    <div class="col-md-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Projects with No Tasks</h5>
-                                <p class="card-text display-4"><?= $noTasksProjects ?></p>
-                                <p class="text-muted">Not Started</p>
+                        <!-- Reassigned Tasks -->
+                        <div class="col-md-4 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Reassigned Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['reassigned_tasks'] ?></p>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Tasks -->
-                    <div class="col-md-3 mt-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Tasks</h5>
-                                <p class="card-text display-4"><?= $totalTasks ?></p>
-                                <p class="text-muted">In Total</p>
+                        <!-- Assigned Tasks -->
+                        <div class="col-md-2 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Assigned Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['assigned_tasks'] ?></p>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Tasks in Progress -->
-                    <div class="col-md-3 mt-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Tasks in Progress</h5>
-                                <p class="card-text display-4"><?= $tasksInProgress ?></p>
-                                <p class="text-muted">Active</p>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Tasks on Hold -->
-                    <div class="col-md-3 mt-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Tasks on Hold</h5>
-                                <p class="card-text display-4"><?= $tasksOnHold ?></p>
-                                <p class="text-muted">Paused</p>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Delayed Tasks -->
-                    <div class="col-md-3 mt-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Delayed Tasks</h5>
-                                <p class="card-text display-4"><?= $delayedTasks ?></p>
-                                <p class="text-muted">Passed Due Date</p>
+                        <!-- In Progress Tasks -->
+                        <div class="col-md-2 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">In Progress Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['in_progress_tasks'] ?></p>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Row 2: Charts and Graphs -->
+                <!-- Inactive Metrics Section -->
+                <div class="mb-4">
+                    <h2 class="section-header">Inactive Metrics</h2>
+                    <div class="row">
+                        <!-- Completed Projects -->
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Completed Projects</h5>
+                                    <p class="card-text display-4"><?= $completedProjects ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- No Tasks Projects -->
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Projects with no Tasks</h5>
+                                    <p class="card-text display-4"><?= $noTasksProjects ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Completed on Time Tasks -->
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Tasks Completed on Time</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['completed_tasks'] ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Delayed Completion Tasks -->
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Delayed Completion Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['delayed_tasks'] ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Closed Tasks -->
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Closed Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['closed_tasks'] ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Cancelled Tasks -->
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Cancelled Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['cancelled_tasks'] ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Hold Tasks -->
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Tasks on Hold</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['hold_tasks'] ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Reinstated Tasks -->
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Reinstated Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['reinstated_tasks'] ?></p>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- Row: Charts and Graphs -->
                 <div class="row mb-4">
+                    <h2 class="section-header">Other Metrics</h2>
                     <!-- Task Distribution Chart -->
                     <div class="col-md-6">
                         <div class="card h-100">
@@ -898,7 +1086,7 @@ try {
                     </div>
                 </div>
 
-                <!-- Row 3: Additional Metrics -->
+                <!-- Row: Additional Metrics -->
                 <div class="row mb-4">
                     <!-- Average Task Duration -->
                     <div class="col-md-4">
@@ -947,7 +1135,8 @@ try {
 
         <!-- Modals for Task Status -->
         <!-- Completed Tasks Modal -->
-        <div class="modal fade" id="completedTasksModal" tabindex="-1" aria-labelledby="completedTasksModalLabel" aria-hidden="true">
+        <div class="modal fade" id="completedTasksModal" tabindex="-1" aria-labelledby="completedTasksModalLabel"
+            aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -980,7 +1169,8 @@ try {
         </div>
 
         <!-- Assigned Tasks Modal -->
-        <div class="modal fade" id="pendingTasksModal" tabindex="-1" aria-labelledby="pendingTasksModalLabel" aria-hidden="true">
+        <div class="modal fade" id="pendingTasksModal" tabindex="-1" aria-labelledby="pendingTasksModalLabel"
+            aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1013,7 +1203,8 @@ try {
         </div>
 
         <!-- In Progress Tasks Modal -->
-        <div class="modal fade" id="inProgressTasksModal" tabindex="-1" aria-labelledby="inProgressTasksModalLabel" aria-hidden="true">
+        <div class="modal fade" id="inProgressTasksModal" tabindex="-1" aria-labelledby="inProgressTasksModalLabel"
+            aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1046,7 +1237,8 @@ try {
         </div>
 
         <!-- Delayed Tasks Modal -->
-        <div class="modal fade" id="delayedTasksModal" tabindex="-1" aria-labelledby="delayedTasksModalLabel" aria-hidden="true">
+        <div class="modal fade" id="delayedTasksModal" tabindex="-1" aria-labelledby="delayedTasksModalLabel"
+            aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1079,7 +1271,8 @@ try {
         </div>
 
         <!-- Hold Tasks Modal -->
-        <div class="modal fade" id="holdTasksModal" tabindex="-1" aria-labelledby="holdTasksModalLabel" aria-hidden="true">
+        <div class="modal fade" id="holdTasksModal" tabindex="-1" aria-labelledby="holdTasksModalLabel"
+            aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1112,7 +1305,8 @@ try {
         </div>
 
         <!-- Cancelled Tasks Modal -->
-        <div class="modal fade" id="cancelledTasksModal" tabindex="-1" aria-labelledby="cancelledTasksModalLabel" aria-hidden="true">
+        <div class="modal fade" id="cancelledTasksModal" tabindex="-1" aria-labelledby="cancelledTasksModalLabel"
+            aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1145,7 +1339,8 @@ try {
         </div>
 
         <!-- Reinstated Tasks Modal -->
-        <div class="modal fade" id="reinstatedTasksModal" tabindex="-1" aria-labelledby="reinstatedTasksModalLabel" aria-hidden="true">
+        <div class="modal fade" id="reinstatedTasksModal" tabindex="-1" aria-labelledby="reinstatedTasksModalLabel"
+            aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1178,7 +1373,8 @@ try {
         </div>
 
         <!-- Reassigned Tasks Modal -->
-        <div class="modal fade" id="reassignedTasksModal" tabindex="-1" aria-labelledby="reassignedTasksModalLabel" aria-hidden="true">
+        <div class="modal fade" id="reassignedTasksModal" tabindex="-1" aria-labelledby="reassignedTasksModalLabel"
+            aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1211,7 +1407,8 @@ try {
         </div>
 
         <!-- Closed Tasks Modal -->
-        <div class="modal fade" id="closedTasksModal" tabindex="-1" aria-labelledby="closedTasksModalLabel" aria-hidden="true">
+        <div class="modal fade" id="closedTasksModal" tabindex="-1" aria-labelledby="closedTasksModalLabel"
+            aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1494,4 +1691,5 @@ try {
             <?php endif; ?>
         </script>
 </body>
+
 </html>
