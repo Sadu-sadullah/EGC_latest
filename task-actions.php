@@ -20,10 +20,11 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
 }
 
 $user_id = $_SESSION['user_id'] ?? null;
-$user_role = $_SESSION['role'] ?? null;
+$selected_role_id = $_SESSION['selected_role_id'] ?? null;
 
-if ($user_id === null || $user_role === null) {
-    die("Error: User ID or role is not set. Please log in again.");
+if ($user_id === null || $selected_role_id === null) {
+    header("Location: portal-login.html");
+    exit;
 }
 
 $timeout_duration = 1200;
@@ -70,15 +71,15 @@ if ($projectQuery) {
 }
 
 $userQuery = $conn->prepare("
-    SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role 
+    SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role
     FROM users u
     JOIN user_departments ud ON u.id = ud.user_id
     JOIN departments d ON ud.department_id = d.id
-    JOIN roles r ON u.role_id = r.id
+    JOIN roles r ON r.id = ?
     WHERE u.id = ?
     GROUP BY u.id
 ");
-$userQuery->bind_param("i", $user_id);
+$userQuery->bind_param("ii", $selected_role_id, $user_id);
 $userQuery->execute();
 $userResult = $userQuery->get_result();
 
@@ -461,7 +462,7 @@ $completedTasks = array_filter($allTasks, function ($task) {
             <?php if (hasPermission('view_projects')): ?>
                 <a href="projects.php">Projects</a>
             <?php endif; ?>
-            <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
+            <?php if (hasPermission('task_actions')): ?>
                 <a href="task-actions.php">Task Actions</a>
             <?php endif; ?>
             <?php if (hasPermission('tasks_archive')): ?>

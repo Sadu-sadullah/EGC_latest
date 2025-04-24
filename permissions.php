@@ -16,31 +16,19 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-// Function to check if a user has a specific permission for a specific module
+// Function to check if a user has a specific permission
 function hasPermission($permission)
 {
     global $conn;
 
-    // Get the user ID from the session
-    $userId = $_SESSION['user_id'];
-
-    // Fetch the user's role ID from the database
-    $roleSql = "SELECT role_id FROM users WHERE id = ?";
-    $stmt = $conn->prepare($roleSql);
-    if (!$stmt) {
-        die("Error preparing statement: " . $conn->error);
-    }
-    $stmt->bind_param("i", $userId);
-    $stmt->execute();
-    $stmt->bind_result($roleId);
-    $stmt->fetch();
-    $stmt->close();
-
-    if (!$roleId) {
-        return false; // User has no role assigned
+    // Check if session and selected_role_id are set
+    if (!isset($_SESSION['selected_role_id'])) {
+        return false; // No role selected, deny permission
     }
 
-    // Query to check if the user's role has the permission
+    $roleId = $_SESSION['selected_role_id'];
+
+    // Query to check if the selected role has the permission
     $sql = "SELECT COUNT(*) 
             FROM role_permissions rp
             JOIN permissions p ON rp.permission_id = p.id

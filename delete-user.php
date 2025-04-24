@@ -2,9 +2,11 @@
 session_start();
 require 'permissions.php';
 
-// Check if the user is logged in and has the necessary permissions
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || !hasPermission('read_all_users')) { // Updated permission check
-    header("Location: login.php");
+$user_id = $_SESSION['user_id'] ?? null;
+$selected_role_id = $_SESSION['selected_role_id'] ?? null;
+
+if ($user_id === null || $selected_role_id === null) {
+    header("Location: portal-login.html");
     exit;
 }
 
@@ -19,27 +21,36 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     // Handle OTP verification
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['otp'])) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['otp']) && isset($_POST['user_id'])) {
         $otp = trim($_POST['otp']);
-        $user_id = $_POST['user_id'];
+        $delete_user_id = $_POST['user_id'];
         $pending_deletion = $_SESSION['pending_deletion'] ?? [];
 
         if (empty($pending_deletion)) {
             $_SESSION['errorMsg'] = "Session expired. Please start the deletion process again.";
+            error_log("Delete User Error: Session expired for user_id $delete_user_id");
         } elseif ($otp !== $pending_deletion['otp'] || time() > $pending_deletion['otp_expiry']) {
             $_SESSION['errorMsg'] = "Invalid or expired OTP.";
             $_SESSION['showDeleteOtpForm'] = true;
+            error_log("Delete User Error: Invalid or expired OTP for user_id $delete_user_id");
+        } elseif ($pending_deletion['user_id'] != $delete_user_id) {
+            $_SESSION['errorMsg'] = "Invalid deletion request.";
+            error_log("Delete User Error: Mismatched user_id in session ($pending_deletion[user_id]) and POST ($delete_user_id)");
         } else {
             // Fetch user details before deletion
             $stmt = $pdo->prepare("
-                SELECT u.id, u.username, u.email, u.role_id, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments
+                SELECT u.id, u.username, u.email,
+                       GROUP_CONCAT(DISTINCT r.id SEPARATOR ',') AS role_ids,
+                       GROUP_CONCAT(DISTINCT d.name SEPARATOR ', ') AS departments
                 FROM users u
+                LEFT JOIN user_roles ur ON u.id = ur.user_id
+                LEFT JOIN roles r ON ur.role_id = r.id
                 LEFT JOIN user_departments ud ON u.id = ud.user_id
                 LEFT JOIN departments d ON ud.department_id = d.id
                 WHERE u.id = ?
                 GROUP BY u.id
             ");
-            $stmt->execute([$user_id]);
+            $stmt->execute([$delete_user_id]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($user) {
@@ -52,14 +63,21 @@ try {
                     $user['id'],
                     $user['username'],
                     $user['email'],
-                    $user['role_id'],
-                    $user['departments'],
+                    $user['role_ids'] ?: '',
+                    $user['departments'] ?: '',
                     $_SESSION['user_id']
                 ]);
 
+                // Delete related records from user_roles and user_departments
+                $deleteRolesStmt = $pdo->prepare("DELETE FROM user_roles WHERE user_id = ?");
+                $deleteRolesStmt->execute([$delete_user_id]);
+
+                $deleteDeptsStmt = $pdo->prepare("DELETE FROM user_departments WHERE user_id = ?");
+                $deleteDeptsStmt->execute([$delete_user_id]);
+
                 // Delete from users table
                 $deleteStmt = $pdo->prepare("DELETE FROM users WHERE id = ?");
-                $deleteStmt->execute([$user_id]);
+                $deleteStmt->execute([$delete_user_id]);
 
                 // Clear session data
                 unset($_SESSION['pending_deletion']);
@@ -67,10 +85,12 @@ try {
                 $_SESSION['deletionMsg'] = "User '{$user['username']}' deleted successfully and logged in audit trail.";
             } else {
                 $_SESSION['errorMsg'] = "User not found.";
+                error_log("Delete User Error: User not found for user_id $delete_user_id");
             }
         }
     } else {
         $_SESSION['errorMsg'] = "Invalid request.";
+        error_log("Delete User Error: Invalid request, missing OTP or user_id");
     }
 
     // Redirect back to the view-users page
@@ -78,6 +98,9 @@ try {
     exit;
 
 } catch (PDOException $e) {
-    die("Error: " . $e->getMessage());
+    error_log("Database Error in delete-user.php: " . $e->getMessage());
+    $_SESSION['errorMsg'] = "Database error occurred.";
+    header("Location: view-users.php");
+    exit;
 }
 ?>

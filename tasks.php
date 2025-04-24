@@ -26,10 +26,11 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
 }
 
 $user_id = $_SESSION['user_id'] ?? null;
-$user_role = $_SESSION['role'] ?? null;
+$selected_role_id = $_SESSION['selected_role_id'] ?? null;
 
-if ($user_id === null || $user_role === null) {
-    die("Error: User ID or role is not set. Please log in again.");
+if ($user_id === null || $selected_role_id === null) {
+    header("Location: portal-login.html");
+    exit;
 }
 
 $timeout_duration = 1200;
@@ -94,15 +95,15 @@ if (hasPermission('view_all_projects')) {
 $projects = $projectQuery->fetch_all(MYSQLI_ASSOC);
 
 $userQuery = $conn->prepare("
-    SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role 
+    SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role
     FROM users u
     JOIN user_departments ud ON u.id = ud.user_id
     JOIN departments d ON ud.department_id = d.id
-    JOIN roles r ON u.role_id = r.id
+    JOIN roles r ON r.id = ?
     WHERE u.id = ?
     GROUP BY u.id
 ");
-$userQuery->bind_param("i", $user_id);
+$userQuery->bind_param("ii", $selected_role_id, $user_id);
 $userQuery->execute();
 $userResult = $userQuery->get_result();
 
@@ -122,28 +123,37 @@ if ($userResult->num_rows > 0) {
 $users = [];
 if (hasPermission('assign_tasks')) {
     if (hasPermission('assign_to_any_user_tasks')) {
+        // Second Query: Fetch all users except those with Admin role
         $userQuery = "
-            SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role 
+            SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, GROUP_CONCAT(r.name SEPARATOR ', ') AS roles
             FROM users u
             JOIN user_departments ud ON u.id = ud.user_id
             JOIN departments d ON ud.department_id = d.id
-            JOIN roles r ON u.role_id = r.id
-            WHERE r.name != 'Admin'
+            LEFT JOIN user_roles ur ON u.id = ur.user_id
+            LEFT JOIN roles r ON ur.role_id = r.id
+            WHERE u.id NOT IN (
+                SELECT u2.id
+                FROM users u2
+                JOIN user_roles ur2 ON u2.id = ur2.user_id
+                JOIN roles r2 ON ur2.role_id = r2.id
+                WHERE r2.name = 'Admin'
+            )
             GROUP BY u.id
         ";
+        $stmt = $conn->prepare($userQuery);
     } else {
+        // Third Query: Fetch users in the same department
         $userQuery = "
-            SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role 
+            SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, GROUP_CONCAT(r.name SEPARATOR ', ') AS roles
             FROM users u
             JOIN user_departments ud ON u.id = ud.user_id
             JOIN departments d ON ud.department_id = d.id
-            JOIN roles r ON u.role_id = r.id
+            LEFT JOIN user_roles ur ON u.id = ur.user_id
+            LEFT JOIN roles r ON ur.role_id = r.id
             WHERE ud.department_id IN (SELECT department_id FROM user_departments WHERE user_id = ?)
             GROUP BY u.id
         ";
-    }
-    $stmt = $conn->prepare($userQuery);
-    if (!hasPermission('assign_to_any_user_tasks')) {
+        $stmt = $conn->prepare($userQuery);
         $stmt->bind_param("i", $user_id);
     }
     $stmt->execute();
@@ -999,7 +1009,7 @@ function getWeekdayHours($start, $end)
             <?php if (hasPermission('view_projects')): ?>
                 <a href="projects.php">Projects</a>
             <?php endif; ?>
-            <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
+            <?php if (hasPermission('task_actions')): ?>
                 <a href="task-actions.php">Task Actions</a>
             <?php endif; ?>
             <?php if (hasPermission('tasks_archive')): ?>
