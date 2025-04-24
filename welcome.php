@@ -8,8 +8,8 @@ session_start();
 
 require 'permissions.php';
 
-// Check if the user is logged in
-if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
+// Check if the user is logged in and has a selected role
+if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true || !isset($_SESSION['selected_role_id'])) {
     header("Location: portal-login.html");
     exit;
 }
@@ -19,6 +19,21 @@ $config = include '../config.php';
 $dsn = "mysql:host=localhost;dbname=new;charset=utf8mb4";
 $username = $config['dbUsername'];
 $password = $config['dbPassword'];
+
+// Define task status arrays
+$activeTaskStatuses = [
+    'Assigned' => 'assigned_tasks',
+    'In Progress' => 'in_progress_tasks',
+    'Reassigned' => 'reassigned_tasks'
+];
+$inactiveTaskStatuses = [
+    'Completed on Time' => 'completed_tasks',
+    'Delayed Completion' => 'delayed_tasks',
+    'Closed' => 'closed_tasks',
+    'Cancelled' => 'cancelled_tasks',
+    'Hold' => 'hold_tasks',
+    'Reinstated' => 'reinstated_tasks'
+];
 
 // Function to generate colors
 function generateColors($count)
@@ -37,73 +52,145 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->exec("SET sql_mode=(SELECT REPLACE(@@sql_mode, 'ONLY_FULL_GROUP_BY', ''))");
 
-    // Prepare and execute the query to fetch the session token
+    // Verify session token
     $checkStmt = $pdo->prepare("SELECT session_token FROM users WHERE id = ?");
     $checkStmt->execute([$_SESSION['user_id']]);
     $sessionToken = $checkStmt->fetchColumn();
 
-    // If the session token doesn't match, log the user out
     if ($sessionToken !== $_SESSION['session_token']) {
         session_unset();
         session_destroy();
         echo "<script>alert('Another person has logged in using the same account. Please try logging in again.'); window.location.href='portal-login.html';</script>";
+        exit;
     }
 
-    // Retrieve the username, role, and user ID from the session
-    $username = $_SESSION['username'] ?? 'Unknown';
-    $userRole = $_SESSION['role'] ?? 'Unknown';
+    // Retrieve user ID
     $userId = $_SESSION['user_id'] ?? null;
 
-    // Fetch all departments assigned to the user
+    // Fetch all roles assigned to the user
+    $roleStmt = $pdo->prepare("
+        SELECT r.id, r.name
+        FROM roles r
+        JOIN user_roles ur ON r.id = ur.role_id
+        WHERE ur.user_id = ?
+    ");
+    $roleStmt->execute([$userId]);
+    $userRoles = $roleStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Store roles in session
+    $_SESSION['user_roles'] = $userRoles;
+
+    // Retrieve username and selected role
+    $username = $_SESSION['username'] ?? 'Unknown';
+    $userRole = $_SESSION['selected_role'] ?? 'Unknown';
+
+    // Fetch user departments
     $userDepartments = [];
     if ($userId) {
         $stmt = $pdo->prepare("
             SELECT d.name 
             FROM user_departments ud
             JOIN departments d ON ud.department_id = d.id
-            WHERE ud.user_id = :user_id
+            WHERE ud.user_id = ?
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute([$userId]);
         $userDepartments = $stmt->fetchAll(PDO::FETCH_COLUMN);
     }
 
-    // Fetch all departments assigned to the manager
-    $managerDepartments = [];
-    if ($userId && $userRole === 'Manager') {
-        $stmt = $pdo->prepare("
-            SELECT d.name 
-            FROM user_departments ud
-            JOIN departments d ON ud.department_id = d.id
-            WHERE ud.user_id = :user_id
-        ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $managerDepartments = $stmt->fetchAll(PDO::FETCH_COLUMN);
-    }
+    // Initialize task counts
+    $taskCounts = array_fill_keys(array_merge(array_values($activeTaskStatuses), array_values($inactiveTaskStatuses)), 0);
+    $totalTasks = 0;
+    $assignedProjects = 0;
+    $inProgressProjects = 0;
+    $completedProjects = 0;
+    $noTasksProjects = 0;
+    $avgDuration = 0;
+    $tasksByDepartment = [];
+    $taskDistribution = [];
+    $taskCompletionOverTime = [];
+    $topPerformers = [];
 
+    // Fetch dashboard data based on permissions
     if (hasPermission('view_all_tasks')) {
-        // Fetch total tasks
+        // Total tasks
         $stmt = $pdo->prepare("SELECT COUNT(*) as total_tasks FROM tasks");
         $stmt->execute();
         $totalTasks = $stmt->fetch(PDO::FETCH_ASSOC)['total_tasks'];
 
-        // Fetch tasks in progress
-        $stmt = $pdo->prepare("SELECT COUNT(*) as tasks_in_progress FROM tasks WHERE status = 'In Progress'");
-        $stmt->execute();
-        $tasksInProgress = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_in_progress'];
+        // Active task counts
+        foreach ($activeTaskStatuses as $status => $key) {
+            $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM tasks WHERE status = ?");
+            $stmt->execute([$status]);
+            $taskCounts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+        }
 
-        // Fetch tasks on hold
-        $stmt = $pdo->prepare("SELECT COUNT(*) as tasks_on_hold FROM tasks WHERE status = 'Hold'");
-        $stmt->execute();
-        $tasksOnHold = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_on_hold'];
+        // Inactive task counts
+        foreach ($inactiveTaskStatuses as $status => $key) {
+            $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM tasks WHERE status = ?");
+            $stmt->execute([$status]);
+            $taskCounts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+        }
 
-        // Fetch delayed tasks
-        $stmt = $pdo->prepare("SELECT COUNT(*) as delayed_tasks FROM tasks WHERE status = 'Delayed Completion'");
+        // Active project counts
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as assigned_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status NOT IN ('Assigned', 'Reassigned')
+            )
+        ");
         $stmt->execute();
-        $delayedTasks = $stmt->fetch(PDO::FETCH_ASSOC)['delayed_tasks'];
+        $assignedProjects = $stmt->fetch(PDO::FETCH_ASSOC)['assigned_projects'];
 
-        // Fetch average task duration
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as in_progress_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            WHERE EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status = 'In Progress'
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t3
+                WHERE t3.project_id = p.id
+                AND t3.status IN ('Completed on Time', 'Delayed Completion', 'Closed', 'Cancelled', 'Hold', 'Reinstated')
+            )
+        ");
+        $stmt->execute();
+        $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
+
+        // Inactive project counts
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as completed_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status IN ('Assigned', 'In Progress', 'Reassigned')
+            )
+        ");
+        $stmt->execute();
+        $completedProjects = $stmt->fetch(PDO::FETCH_ASSOC)['completed_projects'];
+
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as no_tasks_projects
+            FROM projects p
+            LEFT JOIN tasks t ON p.id = t.project_id
+            WHERE t.project_id IS NULL
+        ");
+        $stmt->execute();
+        $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
+
+        // Average task duration
         $stmt = $pdo->prepare(
             "SELECT AVG(
                 CASE 
@@ -119,7 +206,7 @@ try {
         $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
         $avgDuration = round($avgDuration ?? 0, 1);
 
-        // Fetch tasks by department
+        // Tasks by department
         $stmt = $pdo->prepare("
             SELECT d.name, COUNT(t.task_id) as task_count 
             FROM tasks t
@@ -131,27 +218,24 @@ try {
         $stmt->execute();
         $tasksByDepartment = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Generate colors dynamically based on the number of departments
-        $departmentColors = generateColors(count($tasksByDepartment));
-
-        // Fetch task distribution by status
+        // Task distribution
         $stmt = $pdo->prepare("
             SELECT 
-                SUM(CASE WHEN status = 'Assigned' THEN 1 ELSE 0 END) as assigned,
-                SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) as in_progress,
-                SUM(CASE WHEN status = 'Hold' THEN 1 ELSE 0 END) as hold,
-                SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) as cancelled,
-                SUM(CASE WHEN status = 'Reinstated' THEN 1 ELSE 0 END) as reinstated,
-                SUM(CASE WHEN status = 'Reassigned' THEN 1 ELSE 0 END) as reassigned,
-                SUM(CASE WHEN status = 'Completed on Time' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN status = 'Assigned' THEN 1 ELSE 0 END) as `assigned`,
+                SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) as `in_progress`,
+                SUM(CASE WHEN status = 'Hold' THEN 1 ELSE 0 END) as `hold`,
+                SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) as `cancelled`,
+                SUM(CASE WHEN status = 'Reinstated' THEN 1 ELSE 0 END) as `reinstated`,
+                SUM(CASE WHEN status = 'Reassigned' THEN 1 ELSE 0 END) as `reassigned`,
+                SUM(CASE WHEN status = 'Completed on Time' THEN 1 ELSE 0 END) as `completed`,
                 SUM(CASE WHEN status = 'Delayed Completion' THEN 1 ELSE 0 END) as `delayed`,
-                SUM(CASE WHEN status = 'Closed' THEN 1 ELSE 0 END) as closed
+                SUM(CASE WHEN status = 'Closed' THEN 1 ELSE 0 END) as `closed`
             FROM tasks
         ");
         $stmt->execute();
         $taskDistribution = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        // Fetch task completion over time (grouped by month)
+        // Task completion over time
         $stmt = $pdo->prepare("
             SELECT 
                 DATE_FORMAT(planned_finish_date, '%b') as month,
@@ -164,7 +248,7 @@ try {
         $stmt->execute();
         $taskCompletionOverTime = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Fetch top performers
+        // Top performers
         $stmt = $pdo->prepare("
             SELECT 
                 u.username, 
@@ -182,44 +266,8 @@ try {
         $stmt->execute();
         $topPerformers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Fetch total projects
-        $stmt = $pdo->prepare("SELECT COUNT(*) as total_projects FROM projects");
-        $stmt->execute();
-        $totalProjects = $stmt->fetch(PDO::FETCH_ASSOC)['total_projects'];
-
-        // Fetch projects with "In Progress" status
-        $stmt = $pdo->prepare("
-            SELECT COUNT(DISTINCT p.id) as in_progress_projects
-            FROM projects p
-            LEFT JOIN tasks t ON p.id = t.project_id
-            WHERE EXISTS (
-                SELECT 1
-                FROM tasks t2
-                WHERE t2.project_id = p.id
-                AND t2.status IN ('In Progress', 'Completed on Time', 'Delayed Completion', 'Closed')
-            )
-            AND NOT EXISTS (
-                SELECT 1
-                FROM tasks t3
-                WHERE t3.project_id = p.id
-                AND t3.status NOT IN ('Completed on Time', 'Delayed Completion', 'Closed')
-            ) = 0
-        ");
-        $stmt->execute();
-        $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
-
-        // Fetch projects with "No Tasks" status
-        $stmt = $pdo->prepare("
-            SELECT COUNT(*) as no_tasks_projects
-            FROM projects p
-            LEFT JOIN tasks t ON p.id = t.project_id
-            WHERE t.project_id IS NULL
-        ");
-        $stmt->execute();
-        $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
-
     } elseif (hasPermission('view_department_tasks')) {
-        // Fetch total tasks for manager's departments
+        // Total tasks
         $stmt = $pdo->prepare("
             SELECT COUNT(*) as total_tasks 
             FROM tasks t
@@ -227,59 +275,152 @@ try {
             WHERE ud.department_id IN (
                 SELECT department_id 
                 FROM user_departments 
-                WHERE user_id = :user_id
+                WHERE user_id = ?
             )
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute([$userId]);
         $totalTasks = $stmt->fetch(PDO::FETCH_ASSOC)['total_tasks'];
 
-        // Fetch tasks in progress for manager's departments
+        // Active task counts
+        foreach ($activeTaskStatuses as $status => $key) {
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*) as count 
+                FROM tasks t
+                JOIN user_departments ud ON t.user_id = ud.user_id
+                WHERE t.status = ?
+                AND ud.department_id IN (
+                    SELECT department_id 
+                    FROM user_departments 
+                    WHERE user_id = ?
+                )
+            ");
+            $stmt->execute([$status, $userId]);
+            $taskCounts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+        }
+
+        // Inactive task counts
+        foreach ($inactiveTaskStatuses as $status => $key) {
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*) as count 
+                FROM tasks t
+                JOIN user_departments ud ON t.user_id = ud.user_id
+                WHERE t.status = ?
+                AND ud.department_id IN (
+                    SELECT department_id 
+                    FROM user_departments 
+                    WHERE user_id = ?
+                )
+            ");
+            $stmt->execute([$status, $userId]);
+            $taskCounts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+        }
+
+        // Active project counts
         $stmt = $pdo->prepare("
-            SELECT COUNT(*) as tasks_in_progress 
-            FROM tasks t
+            SELECT COUNT(DISTINCT p.id) as assigned_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
             JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE t.status = 'In Progress' AND ud.department_id IN (
+            WHERE ud.department_id IN (
                 SELECT department_id 
                 FROM user_departments 
-                WHERE user_id = :user_id
+                WHERE user_id = ?
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status NOT IN ('Assigned', 'Reassigned')
             )
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $tasksInProgress = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_in_progress'];
+        $stmt->execute([$userId]);
+        $assignedProjects = $stmt->fetch(PDO::FETCH_ASSOC)['assigned_projects'];
 
-        // Fetch tasks on hold for manager's departments
         $stmt = $pdo->prepare("
-            SELECT COUNT(*) as tasks_on_hold 
-            FROM tasks t
+            SELECT COUNT(DISTINCT p.id) as in_progress_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
             JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE t.status = 'Hold' AND ud.department_id IN (
+            WHERE ud.department_id IN (
                 SELECT department_id 
                 FROM user_departments 
-                WHERE user_id = :user_id
+                WHERE user_id = ?
+            )
+            AND EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status = 'In Progress'
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t3
+                WHERE t3.project_id = p.id
+                AND t3.status IN ('Completed on Time', 'Delayed Completion', 'Closed', 'Cancelled', 'Hold', 'Reinstated')
             )
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $tasksOnHold = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_on_hold'];
+        $stmt->execute([$userId]);
+        $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
 
-        // Fetch delayed tasks for manager's departments
+        // Inactive project counts
         $stmt = $pdo->prepare("
-            SELECT COUNT(*) as delayed_tasks 
-            FROM tasks t
+            SELECT COUNT(DISTINCT p.id) as completed_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
             JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE t.status = 'Delayed Completion' AND ud.department_id IN (
+            WHERE ud.department_id IN (
                 SELECT department_id 
                 FROM user_departments 
-                WHERE user_id = :user_id
+                WHERE user_id = ?
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status IN ('Assigned', 'In Progress', 'Reassigned')
             )
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $delayedTasks = $stmt->fetch(PDO::FETCH_ASSOC)['delayed_tasks'];
+        $stmt->execute([$userId]);
+        $completedProjects = $stmt->fetch(PDO::FETCH_ASSOC)['completed_projects'];
 
-        // Fetch tasks by department for manager's departments
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as no_tasks_projects
+            FROM projects p
+            LEFT JOIN tasks t ON p.id = t.project_id
+            JOIN user_departments ud ON t.user_id = ud.user_id
+            WHERE t.project_id IS NULL
+            AND ud.department_id IN (
+                SELECT department_id 
+                FROM user_departments 
+                WHERE user_id = ?
+            )
+        ");
+        $stmt->execute([$userId]);
+        $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
+
+        // Average task duration
+        $stmt = $pdo->prepare("
+            SELECT AVG(
+                CASE 
+                    WHEN actual_start_date IS NOT NULL AND actual_finish_date IS NOT NULL 
+                    THEN TIMESTAMPDIFF(DAY, actual_start_date, actual_finish_date)
+                    ELSE TIMESTAMPDIFF(DAY, planned_start_date, planned_finish_date)
+                END
+            ) as avg_duration 
+            FROM tasks t
+            JOIN user_departments ud ON t.user_id = ud.user_id
+            WHERE t.status = 'Completed on Time'
+            AND ud.department_id IN (
+                SELECT department_id 
+                FROM user_departments 
+                WHERE user_id = ?
+            )
+        ");
+        $stmt->execute([$userId]);
+        $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
+        $avgDuration = round($avgDuration ?? 0, 1);
+
+        // Tasks by department
         $stmt = $pdo->prepare("
             SELECT d.name, COUNT(t.task_id) as task_count 
             FROM tasks t
@@ -289,61 +430,56 @@ try {
             WHERE ud.department_id IN (
                 SELECT department_id 
                 FROM user_departments 
-                WHERE user_id = :user_id
+                WHERE user_id = ?
             )
             GROUP BY d.name
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute([$userId]);
         $tasksByDepartment = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Generate colors dynamically based on the number of departments
-        $departmentColors = generateColors(count($tasksByDepartment));
-
-        // Fetch task distribution by status for manager's departments
+        // Task distribution
         $stmt = $pdo->prepare("
             SELECT 
-                SUM(CASE WHEN status = 'Assigned' THEN 1 ELSE 0 END) as assigned,
-                SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) as in_progress,
-                SUM(CASE WHEN status = 'Hold' THEN 1 ELSE 0 END) as hold,
-                SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) as cancelled,
-                SUM(CASE WHEN status = 'Reinstated' THEN 1 ELSE 0 END) as reinstated,
-                SUM(CASE WHEN status = 'Reassigned' THEN 1 ELSE 0 END) as reassigned,
-                SUM(CASE WHEN status = 'Completed on Time' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN status = 'Assigned' THEN 1 ELSE 0 END) as `assigned`,
+                SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) as `in_progress`,
+                SUM(CASE WHEN status = 'Hold' THEN 1 ELSE 0 END) as `hold`,
+                SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) as `cancelled`,
+                SUM(CASE WHEN status = 'Reinstated' THEN 1 ELSE 0 END) as `reinstated`,
+                SUM(CASE WHEN status = 'Reassigned' THEN 1 ELSE 0 END) as `reassigned`,
+                SUM(CASE WHEN status = 'Completed on Time' THEN 1 ELSE 0 END) as `completed`,
                 SUM(CASE WHEN status = 'Delayed Completion' THEN 1 ELSE 0 END) as `delayed`,
-                SUM(CASE WHEN status = 'Closed' THEN 1 ELSE 0 END) as closed
+                SUM(CASE WHEN status = 'Closed' THEN 1 ELSE 0 END) as `closed`
             FROM tasks t
             JOIN user_departments ud ON t.user_id = ud.user_id
             WHERE ud.department_id IN (
                 SELECT department_id 
                 FROM user_departments 
-                WHERE user_id = :user_id
+                WHERE user_id = ?
             )
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute([$userId]);
         $taskDistribution = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        // Fetch task completion over time for manager's departments
+        // Task completion over time
         $stmt = $pdo->prepare("
             SELECT 
                 DATE_FORMAT(planned_finish_date, '%b') as month,
                 COUNT(*) as tasks_completed
             FROM tasks t
             JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE t.status = 'Completed on Time' AND ud.department_id IN (
+            WHERE t.status = 'Completed on Time'
+            AND ud.department_id IN (
                 SELECT department_id 
                 FROM user_departments 
-                WHERE user_id = :user_id
+                WHERE user_id = ?
             )
             GROUP BY DATE_FORMAT(planned_finish_date, '%Y-%m')
-            ORDER BY planned_finish_date
+            ORDER BY MIN(planned_finish_date)
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute([$userId]);
         $taskCompletionOverTime = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Fetch top performers for manager's departments
+        // Top performers
         $stmt = $pdo->prepare("
             SELECT 
                 u.username, 
@@ -353,162 +489,113 @@ try {
             JOIN users u ON t.user_id = u.id
             JOIN user_departments ud ON u.id = ud.user_id
             JOIN departments d ON ud.department_id = d.id
-            WHERE t.status = 'Completed on Time' AND ud.department_id IN (
+            WHERE t.status = 'Completed on Time'
+            AND ud.department_id IN (
                 SELECT department_id 
                 FROM user_departments 
-                WHERE user_id = :user_id
+                WHERE user_id = ?
             )
             GROUP BY u.username, d.name
             ORDER BY tasks_completed DESC
             LIMIT 3
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute([$userId]);
         $topPerformers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Fetch average task duration for manager's departments
-        $stmt = $pdo->prepare("
-            SELECT AVG(
-                CASE 
-                    WHEN actual_start_date IS NOT NULL AND actual_finish_date IS NOT NULL 
-                    THEN TIMESTAMPDIFF(DAY, actual_start_date, actual_finish_date)
-                    ELSE TIMESTAMPDIFF(DAY, planned_start_date, planned_finish_date)
-                END
-            ) as avg_duration
-            FROM tasks t
-            JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE t.status = 'Completed on Time'
-            AND ud.department_id IN (
-                SELECT department_id
-                FROM user_departments
-                WHERE user_id = :user_id
-            )
-        ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
-        $avgDuration = round($avgDuration ?? 0, 1);
+    } elseif (hasPermission('view_own_tasks')) {
+        // Total tasks
+        $stmt = $pdo->prepare("SELECT COUNT(*) as total_tasks FROM tasks WHERE user_id = ?");
+        $stmt->execute([$userId]);
+        $totalTasks = $stmt->fetch(PDO::FETCH_ASSOC)['total_tasks'];
 
-        // Fetch total projects for departments
+        // Active task counts
+        foreach ($activeTaskStatuses as $status => $key) {
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*) as count 
+                FROM tasks 
+                WHERE user_id = ? 
+                AND status = ?
+            ");
+            $stmt->execute([$userId, $status]);
+            $taskCounts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+        }
+
+        // Inactive task counts
+        foreach ($inactiveTaskStatuses as $status => $key) {
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*) as count 
+                FROM tasks 
+                WHERE user_id = ? 
+                AND status = ?
+            ");
+            $stmt->execute([$userId, $status]);
+            $taskCounts[$key] = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+        }
+
+        // Active project counts
         $stmt = $pdo->prepare("
-            SELECT COUNT(DISTINCT p.id) as total_projects 
+            SELECT COUNT(DISTINCT p.id) as assigned_projects
             FROM projects p
             JOIN tasks t ON p.id = t.project_id
-            JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE ud.department_id IN (
-                SELECT department_id 
-                FROM user_departments 
-                WHERE user_id = :user_id
+            WHERE t.user_id = ?
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status NOT IN ('Assigned', 'Reassigned')
             )
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $totalProjects = $stmt->fetch(PDO::FETCH_ASSOC)['total_projects'];
+        $stmt->execute([$userId]);
+        $assignedProjects = $stmt->fetch(PDO::FETCH_ASSOC)['assigned_projects'];
 
-        // Fetch projects with "In Progress" status for departments
         $stmt = $pdo->prepare("
             SELECT COUNT(DISTINCT p.id) as in_progress_projects
             FROM projects p
             JOIN tasks t ON p.id = t.project_id
-            JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE ud.department_id IN (
-                SELECT department_id 
-                FROM user_departments 
-                WHERE user_id = :user_id
-            )
+            WHERE t.user_id = ?
             AND EXISTS (
                 SELECT 1
                 FROM tasks t2
                 WHERE t2.project_id = p.id
-                AND t2.status IN ('In Progress', 'Completed on Time', 'Delayed Completion', 'Closed')
+                AND t2.status = 'In Progress'
             )
             AND NOT EXISTS (
                 SELECT 1
                 FROM tasks t3
                 WHERE t3.project_id = p.id
-                AND t3.status NOT IN ('Completed on Time', 'Delayed Completion', 'Closed')
-            ) = 0
+                AND t3.status IN ('Completed on Time', 'Delayed Completion', 'Closed', 'Cancelled', 'Hold', 'Reinstated')
+            )
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute([$userId]);
         $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
 
-        // Fetch projects with "No Tasks" status for departments
+        // Inactive project counts
+        $stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT p.id) as completed_projects
+            FROM projects p
+            JOIN tasks t ON p.id = t.project_id
+            WHERE t.user_id = ?
+            AND NOT EXISTS (
+                SELECT 1
+                FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND t2.status IN ('Assigned', 'In Progress', 'Reassigned')
+            )
+        ");
+        $stmt->execute([$userId]);
+        $completedProjects = $stmt->fetch(PDO::FETCH_ASSOC)['completed_projects'];
+
         $stmt = $pdo->prepare("
             SELECT COUNT(DISTINCT p.id) as no_tasks_projects
             FROM projects p
             LEFT JOIN tasks t ON p.id = t.project_id
-            JOIN user_departments ud ON t.user_id = ud.user_id
-            WHERE ud.department_id IN (
-                SELECT department_id 
-                FROM user_departments 
-                WHERE user_id = :user_id
-            )
+            WHERE t.user_id = ?
             AND t.project_id IS NULL
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute([$userId]);
         $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
 
-    } elseif (hasPermission('view_own_tasks')) {
-        // Fetch total tasks for the user
-        $stmt = $pdo->prepare("SELECT COUNT(*) as total_tasks FROM tasks WHERE user_id = :user_id");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $totalTasks = $stmt->fetch(PDO::FETCH_ASSOC)['total_tasks'];
-
-        // Fetch tasks in progress for the user
-        $stmt = $pdo->prepare("SELECT COUNT(*) as tasks_in_progress FROM tasks WHERE user_id = :user_id AND status = 'In Progress'");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $tasksInProgress = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_in_progress'];
-
-        // Fetch tasks on hold for the user
-        $stmt = $pdo->prepare("SELECT COUNT(*) as tasks_on_hold FROM tasks WHERE user_id = :user_id AND status = 'Hold'");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $tasksOnHold = $stmt->fetch(PDO::FETCH_ASSOC)['tasks_on_hold'];
-
-        // Fetch delayed tasks for the user
-        $stmt = $pdo->prepare("SELECT COUNT(*) as delayed_tasks FROM tasks WHERE user_id = :user_id AND status = 'Delayed Completion'");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $delayedTasks = $stmt->fetch(PDO::FETCH_ASSOC)['delayed_tasks'];
-
-        // Fetch task distribution by status for the user
-        $stmt = $pdo->prepare("
-            SELECT 
-                SUM(CASE WHEN status = 'Assigned' THEN 1 ELSE 0 END) as assigned,
-                SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) as in_progress,
-                SUM(CASE WHEN status = 'Hold' THEN 1 ELSE 0 END) as hold,
-                SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) as cancelled,
-                SUM(CASE WHEN status = 'Reinstated' THEN 1 ELSE 0 END) as reinstated,
-                SUM(CASE WHEN status = 'Reassigned' THEN 1 ELSE 0 END) as reassigned,
-                SUM(CASE WHEN status = 'Completed on Time' THEN 1 ELSE 0 END) as completed,
-                SUM(CASE WHEN status = 'Delayed Completion' THEN 1 ELSE 0 END) as `delayed`,
-                SUM(CASE WHEN status = 'Closed' THEN 1 ELSE 0 END) as closed
-            FROM tasks
-            WHERE user_id = :user_id
-        ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $taskDistribution = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        // Fetch task completion over time for the user
-        $stmt = $pdo->prepare("
-            SELECT 
-                DATE_FORMAT(planned_finish_date, '%b') as month,
-                COUNT(*) as tasks_completed
-            FROM tasks
-            WHERE status = 'Completed on Time' AND user_id = :user_id
-            GROUP BY DATE_FORMAT(planned_finish_date, '%Y-%m')
-            ORDER BY planned_finish_date
-        ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $taskCompletionOverTime = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // Fetch average task duration for the user
+        // Average task duration
         $stmt = $pdo->prepare("
             SELECT AVG(
                 CASE 
@@ -519,61 +606,48 @@ try {
             ) as avg_duration 
             FROM tasks 
             WHERE status = 'Completed on Time' 
-            AND user_id = :user_id
+            AND user_id = ?
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute([$userId]);
         $avgDuration = $stmt->fetch(PDO::FETCH_ASSOC)['avg_duration'];
         $avgDuration = round($avgDuration ?? 0, 1);
 
-        // Fetch total projects for the user
+        // Task distribution
         $stmt = $pdo->prepare("
-            SELECT COUNT(DISTINCT p.id) as total_projects 
-            FROM projects p
-            JOIN tasks t ON p.id = t.project_id
-            WHERE t.user_id = :user_id
+            SELECT 
+                SUM(CASE WHEN status = 'Assigned' THEN 1 ELSE 0 END) as `assigned`,
+                SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) as `in_progress`,
+                SUM(CASE WHEN status = 'Hold' THEN 1 ELSE 0 END) as `hold`,
+                SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) as `cancelled`,
+                SUM(CASE WHEN status = 'Reinstated' THEN 1 ELSE 0 END) as `reinstated`,
+                SUM(CASE WHEN status = 'Reassigned' THEN 1 ELSE 0 END) as `reassigned`,
+                SUM(CASE WHEN status = 'Completed on Time' THEN 1 ELSE 0 END) as `completed`,
+                SUM(CASE WHEN status = 'Delayed Completion' THEN 1 ELSE 0 END) as `delayed`,
+                SUM(CASE WHEN status = 'Closed' THEN 1 ELSE 0 END) as `closed`
+            FROM tasks
+            WHERE user_id = ?
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $totalProjects = $stmt->fetch(PDO::FETCH_ASSOC)['total_projects'];
+        $stmt->execute([$userId]);
+        $taskDistribution = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        // Fetch projects with "In Progress" status for the user
+        // Task completion over time
         $stmt = $pdo->prepare("
-            SELECT COUNT(DISTINCT p.id) as in_progress_projects
-            FROM projects p
-            JOIN tasks t ON p.id = t.project_id
-            WHERE t.user_id = :user_id
-            AND EXISTS (
-                SELECT 1
-                FROM tasks t2
-                WHERE t2.project_id = p.id
-                AND t2.status IN ('In Progress', 'Completed on Time', 'Delayed Completion', 'Closed')
-            )
-            AND NOT EXISTS (
-                SELECT 1
-                FROM tasks t3
-                WHERE t3.project_id = p.id
-                AND t3.status NOT IN ('Completed on Time', 'Delayed Completion', 'Closed')
-            ) = 0
+            SELECT 
+                DATE_FORMAT(planned_finish_date, '%b') as month,
+                COUNT(*) as tasks_completed
+            FROM tasks
+            WHERE status = 'Completed on Time' 
+            AND user_id = ?
+            GROUP BY DATE_FORMAT(planned_finish_date, '%Y-%m')
+            ORDER BY MIN(planned_finish_date)
         ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $inProgressProjects = $stmt->fetch(PDO::FETCH_ASSOC)['in_progress_projects'];
-
-        // Fetch projects with "No Tasks" status for the user
-        $stmt = $pdo->prepare("
-            SELECT COUNT(DISTINCT p.id) as no_tasks_projects
-            FROM projects p
-            LEFT JOIN tasks t ON p.id = t.project_id
-            WHERE t.user_id = :user_id
-            AND t.project_id IS NULL
-        ");
-        $stmt->bindParam(':user_id', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-        $noTasksProjects = $stmt->fetch(PDO::FETCH_ASSOC)['no_tasks_projects'];
+        $stmt->execute([$userId]);
+        $taskCompletionOverTime = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    // Session timeout settings
+    $departmentColors = generateColors(count($tasksByDepartment));
+
+    // Session timeout
     $timeout_duration = 1200;
     if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeout_duration) {
         session_unset();
@@ -581,8 +655,6 @@ try {
         header("Location: portal-login.html");
         exit;
     }
-
-    // Update last activity time
     $_SESSION['last_activity'] = time();
 
 } catch (PDOException $e) {
@@ -591,6 +663,7 @@ try {
 ?>
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -655,6 +728,7 @@ try {
             border-radius: 5px;
             cursor: pointer;
             transition: background-color 0.3s;
+            margin-left: 10px;
         }
 
         .logout-btn:hover {
@@ -717,20 +791,6 @@ try {
             height: 300px !important;
         }
 
-        .modal-content {
-            border-radius: 10px;
-        }
-
-        .modal-header {
-            background-color: #002c5f;
-            color: white;
-            border-radius: 10px 10px 0 0;
-        }
-
-        .modal-title {
-            font-weight: bold;
-        }
-
         .table-responsive {
             max-height: 400px;
             overflow-y: auto;
@@ -752,8 +812,16 @@ try {
             text-align: center;
             height: 100%;
         }
+
+        .section-header {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #002c5f;
+            margin-bottom: 1rem;
+        }
     </style>
 </head>
+
 <body>
     <div class="dashboard-container">
         <!-- Sidebar -->
@@ -763,7 +831,7 @@ try {
             <?php if (hasPermission('view_projects')): ?>
                 <a href="projects.php">Projects</a>
             <?php endif; ?>
-            <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
+            <?php if (hasPermission('task_actions')): ?>
                 <a href="task-actions.php">Task Actions</a>
             <?php endif; ?>
             <?php if (hasPermission('tasks_archive')): ?>
@@ -789,6 +857,7 @@ try {
                 </div>
                 <div class="user-info me-3 ms-auto">
                     <p class="mb-0">Logged in as: <strong><?= htmlspecialchars($username) ?></strong></p>
+                    <p class="mb-0">Role: <strong><?= htmlspecialchars($userRole) ?></strong></p>
                     <p class="mb-0">Departments:
                         <strong><?= !empty($userDepartments) ? htmlspecialchars(implode(', ', $userDepartments)) : 'None' ?></strong>
                     </p>
@@ -798,83 +867,127 @@ try {
 
             <!-- Dashboard Content -->
             <div class="dashboard-content">
-                <!-- Row 1: Key Metrics -->
-                <div class="row mb-4">
-                    <!-- Total Projects -->
-                    <div class="col-md-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Total Projects</h5>
-                                <p class="card-text display-4"><?= $totalProjects ?></p>
-                                <p class="text-muted">Created</p>
+                <!-- Active Metrics Section -->
+                <div class="mb-4">
+                    <h2 class="section-header">Active Metrics</h2>
+                    <div class="row">
+                        <div class="col-md-2 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Assigned Projects</h5>
+                                    <p class="card-text display-4"><?= $assignedProjects ?></p>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Projects In Progress -->
-                    <div class="col-md-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Projects In Progress</h5>
-                                <p class="card-text display-4"><?= $inProgressProjects ?></p>
-                                <p class="text-muted">Active</p>
+                        <div class="col-md-2 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">In Progress Projects</h5>
+                                    <p class="card-text display-4"><?= $inProgressProjects ?></p>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Projects with No Tasks -->
-                    <div class="col-md-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Projects with No Tasks</h5>
-                                <p class="card-text display-4"><?= $noTasksProjects ?></p>
-                                <p class="text-muted">Not Started</p>
+                        <div class="col-md-4 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Reassigned Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['reassigned_tasks'] ?></p>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Tasks -->
-                    <div class="col-md-3 mt-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Tasks</h5>
-                                <p class="card-text display-4"><?= $totalTasks ?></p>
-                                <p class="text-muted">In Total</p>
+                        <div class="col-md-2 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Assigned Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['assigned_tasks'] ?></p>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Tasks in Progress -->
-                    <div class="col-md-3 mt-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Tasks in Progress</h5>
-                                <p class="card-text display-4"><?= $tasksInProgress ?></p>
-                                <p class="text-muted">Active</p>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Tasks on Hold -->
-                    <div class="col-md-3 mt-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Tasks on Hold</h5>
-                                <p class="card-text display-4"><?= $tasksOnHold ?></p>
-                                <p class="text-muted">Paused</p>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Delayed Tasks -->
-                    <div class="col-md-3 mt-4">
-                        <div class="card metric-card h-100">
-                            <div class="card-body">
-                                <h5 class="card-title">Delayed Tasks</h5>
-                                <p class="card-text display-4"><?= $delayedTasks ?></p>
-                                <p class="text-muted">Passed Due Date</p>
+                        <div class="col-md-2 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">In Progress Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['in_progress_tasks'] ?></p>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Row 2: Charts and Graphs -->
+                <!-- Inactive Metrics Section -->
+                <div class="mb-4">
+                    <h2 class="section-header">Inactive Metrics</h2>
+                    <div class="row">
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Completed Projects</h5>
+                                    <p class="card-text display-4"><?= $completedProjects ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Projects with no Tasks</h5>
+                                    <p class="card-text display-4"><?= $noTasksProjects ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Tasks Completed on Time</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['completed_tasks'] ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Delayed Completion Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['delayed_tasks'] ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Closed Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['closed_tasks'] ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Cancelled Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['cancelled_tasks'] ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Tasks on Hold</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['hold_tasks'] ?></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="card metric-card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">Reinstated Tasks</h5>
+                                    <p class="card-text display-4"><?= $taskCounts['reinstated_tasks'] ?></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts and Graphs -->
                 <div class="row mb-4">
-                    <!-- Task Distribution Chart -->
+                    <h2 class="section-header">Other Metrics</h2>
                     <div class="col-md-6">
                         <div class="card h-100">
                             <div class="card-body">
@@ -885,7 +998,6 @@ try {
                             </div>
                         </div>
                     </div>
-                    <!-- Task Completion Over Time -->
                     <div class="col-md-6">
                         <div class="card h-100">
                             <div class="card-body">
@@ -898,9 +1010,8 @@ try {
                     </div>
                 </div>
 
-                <!-- Row 3: Additional Metrics -->
+                <!-- Additional Metrics -->
                 <div class="row mb-4">
-                    <!-- Average Task Duration -->
                     <div class="col-md-4">
                         <div class="card metric-card h-100">
                             <div class="card-body">
@@ -910,7 +1021,6 @@ try {
                             </div>
                         </div>
                     </div>
-                    <!-- Tasks by Department (Only for Admin and Manager) -->
                     <?php if (hasPermission('dashboard_tasks')): ?>
                         <div class="col-md-4">
                             <div class="card h-100">
@@ -922,16 +1032,14 @@ try {
                                 </div>
                             </div>
                         </div>
-                    <?php endif; ?>
-                    <!-- User Performance (Only for Admin and Manager) -->
-                    <?php if (hasPermission('dashboard_tasks')): ?>
                         <div class="col-md-4">
                             <div class="card h-100">
                                 <div class="card-body">
                                     <h5 class="text-center card-title">Top Performers</h5>
                                     <ul class="list-group list-group-flush">
                                         <?php foreach ($topPerformers as $performer): ?>
-                                            <li class="list-group-item"><?= htmlspecialchars($performer['username']) ?>
+                                            <li class="list-group-item">
+                                                <?= htmlspecialchars($performer['username']) ?>
                                                 (<?= htmlspecialchars($performer['department']) ?>) -
                                                 <?= $performer['tasks_completed'] ?> tasks completed
                                             </li>
@@ -944,554 +1052,163 @@ try {
                 </div>
             </div>
         </div>
+    </div>
 
-        <!-- Modals for Task Status -->
-        <!-- Completed Tasks Modal -->
-        <div class="modal fade" id="completedTasksModal" tabindex="-1" aria-labelledby="completedTasksModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="completedTasksModalLabel">Completed Tasks (Last 3 Months)</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    <!-- Task Status Modals -->
+    <div class="modal fade" id="completedTasksModal" tabindex="-1" aria-labelledby="completedTasksModalLabel"
+        aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="completedTasksModalLabel">Completed Tasks (Last 3 Months)</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Task ID</th>
+                                    <th>Task Name</th>
+                                    <th>Assigned To</th>
+                                    <th>Department</th>
+                                    <th>Completion Date</th>
+                                </tr>
+                            </thead>
+                            <tbody id="completedTasksTableBody"></tbody>
+                        </table>
                     </div>
-                    <div class="modal-body">
-                        <div class="table-responsive">
-                            <table class="table table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Task ID</th>
-                                        <th>Task Name</th>
-                                        <th>Assigned To</th>
-                                        <th>Department</th>
-                                        <th>Completion Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="completedTasksTableBody">
-                                    <!-- Rows will be populated dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
         </div>
+    </div>
+    <!-- Add other modals (Assigned, In Progress, etc.) as needed -->
 
-        <!-- Assigned Tasks Modal -->
-        <div class="modal fade" id="pendingTasksModal" tabindex="-1" aria-labelledby="pendingTasksModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="pendingTasksModalLabel">Assigned Tasks (Last 3 Months)</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="table-responsive">
-                            <table class="table table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Task ID</th>
-                                        <th>Task Name</th>
-                                        <th>Assigned To</th>
-                                        <th>Department</th>
-                                        <th>Expected Start Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="pendingTasksTableBody">
-                                    <!-- Rows will be populated dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- In Progress Tasks Modal -->
-        <div class="modal fade" id="inProgressTasksModal" tabindex="-1" aria-labelledby="inProgressTasksModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="inProgressTasksModalLabel">In Progress Tasks (Last 3 Months)</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="table-responsive">
-                            <table class="table table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Task ID</th>
-                                        <th>Task Name</th>
-                                        <th>Assigned To</th>
-                                        <th>Department</th>
-                                        <th>Start Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="inProgressTasksTableBody">
-                                    <!-- Rows will be populated dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Delayed Tasks Modal -->
-        <div class="modal fade" id="delayedTasksModal" tabindex="-1" aria-labelledby="delayedTasksModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="delayedTasksModalLabel">Delayed Tasks (Last 3 Months)</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="table-responsive">
-                            <table class="table table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Task ID</th>
-                                        <th>Task Name</th>
-                                        <th>Assigned To</th>
-                                        <th>Department</th>
-                                        <th>Expected Finish Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="delayedTasksTableBody">
-                                    <!-- Rows will be populated dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Hold Tasks Modal -->
-        <div class="modal fade" id="holdTasksModal" tabindex="-1" aria-labelledby="holdTasksModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="holdTasksModalLabel">Hold Tasks</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="table-responsive">
-                            <table class="table table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Task ID</th>
-                                        <th>Task Name</th>
-                                        <th>Assigned To</th>
-                                        <th>Department</th>
-                                        <th>Start Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="holdTasksTableBody">
-                                    <!-- Rows will be populated dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Cancelled Tasks Modal -->
-        <div class="modal fade" id="cancelledTasksModal" tabindex="-1" aria-labelledby="cancelledTasksModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="cancelledTasksModalLabel">Cancelled Tasks</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="table-responsive">
-                            <table class="table table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Task ID</th>
-                                        <th>Task Name</th>
-                                        <th>Assigned To</th>
-                                        <th>Department</th>
-                                        <th>Start Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="cancelledTasksTableBody">
-                                    <!-- Rows will be populated dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Reinstated Tasks Modal -->
-        <div class="modal fade" id="reinstatedTasksModal" tabindex="-1" aria-labelledby="reinstatedTasksModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="reinstatedTasksModalLabel">Reinstated Tasks</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="table-responsive">
-                            <table class="table table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Task ID</th>
-                                        <th>Task Name</th>
-                                        <th>Assigned To</th>
-                                        <th>Department</th>
-                                        <th>Start Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="reinstatedTasksTableBody">
-                                    <!-- Rows will be populated dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Reassigned Tasks Modal -->
-        <div class="modal fade" id="reassignedTasksModal" tabindex="-1" aria-labelledby="reassignedTasksModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="reassignedTasksModalLabel">Reassigned Tasks</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="table-responsive">
-                            <table class="table table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Task ID</th>
-                                        <th>Task Name</th>
-                                        <th>Assigned To</th>
-                                        <th>Department</th>
-                                        <th>Start Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="reassignedTasksTableBody">
-                                    <!-- Rows will be populated dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Closed Tasks Modal -->
-        <div class="modal fade" id="closedTasksModal" tabindex="-1" aria-labelledby="closedTasksModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="closedTasksModalLabel">Closed Tasks</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="table-responsive">
-                            <table class="table table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Task ID</th>
-                                        <th>Task Name</th>
-                                        <th>Assigned To</th>
-                                        <th>Department</th>
-                                        <th>Start Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="closedTasksTableBody">
-                                    <!-- Rows will be populated dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Bootstrap JS (with Popper.js) -->
-        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-        <!-- Chart.js -->
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        <script>
-            const statusMapping = {
-                'Assigned': 'Assigned',
-                'In Progress': 'In Progress',
-                'Completed': 'Completed on Time',
-                'Delayed': 'Delayed Completion'
-            };
-
-            // Task Distribution Chart (Pie Chart)
-            const taskDistributionChart = new Chart(document.getElementById('taskDistributionChart'), {
-                type: 'pie',
-                data: {
-                    labels: [
-                        'Assigned',
-                        'In Progress',
-                        'Hold',
-                        'Cancelled',
-                        'Reinstated',
-                        'Reassigned',
-                        'Completed on Time',
-                        'Delayed Completion',
-                        'Closed'
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // Task Distribution Chart
+        const taskDistributionChart = new Chart(document.getElementById('taskDistributionChart'), {
+            type: 'pie',
+            data: {
+                labels: ['Assigned', 'In Progress', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned', 'Completed on Time', 'Delayed Completion', 'Closed'],
+                datasets: [{
+                    label: 'Task Distribution',
+                    data: [
+                        <?= $taskDistribution['assigned'] ?? 0 ?>,
+                        <?= $taskDistribution['in_progress'] ?? 0 ?>,
+                        <?= $taskDistribution['hold'] ?? 0 ?>,
+                        <?= $taskDistribution['cancelled'] ?? 0 ?>,
+                        <?= $taskDistribution['reinstated'] ?? 0 ?>,
+                        <?= $taskDistribution['reassigned'] ?? 0 ?>,
+                        <?= $taskDistribution['completed'] ?? 0 ?>,
+                        <?= $taskDistribution['delayed'] ?? 0 ?>,
+                        <?= $taskDistribution['closed'] ?? 0 ?>
                     ],
-                    datasets: [{
-                        label: 'Task Distribution',
-                        data: [
-                            <?= $taskDistribution['assigned'] ?>,
-                            <?= $taskDistribution['in_progress'] ?>,
-                            <?= $taskDistribution['hold'] ?>,
-                            <?= $taskDistribution['cancelled'] ?>,
-                            <?= $taskDistribution['reinstated'] ?>,
-                            <?= $taskDistribution['reassigned'] ?>,
-                            <?= $taskDistribution['completed'] ?>,
-                            <?= $taskDistribution['delayed'] ?>,
-                            <?= $taskDistribution['closed'] ?>
-                        ],
-                        backgroundColor: [
-                            '#FF0000',
-                            '#0000FF',
-                            '#800080',
-                            '#EE2C2C',
-                            '#660000',
-                            '#FF6600',
-                            '#00CD00',
-                            '#FFD54F',
-                            '#64B5F6'
-                        ],
-                        hoverOffset: 4
-                    }]
+                    backgroundColor: ['#FF0000', '#0000FF', '#800080', '#EE2C2C', '#660000', '#FF6600', '#00CD00', '#FFD54F', '#64B5F6'],
+                    hoverOffset: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom' },
+                    title: { display: true, text: 'Task Distribution by Status' }
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                        },
-                        title: {
-                            display: true,
-                            text: 'Task Distribution by Status'
-                        }
-                    },
-                    onClick: (event, elements) => {
-                        if (elements.length > 0) {
-                            const index = elements[0].index;
-                            const statusLabel = [
-                                'Assigned',
-                                'In Progress',
-                                'Hold',
-                                'Cancelled',
-                                'Reinstated',
-                                'Reassigned',
-                                'Completed on Time',
-                                'Delayed Completion',
-                                'Closed'
-                            ][index];
-                            fetchTaskData(statusLabel);
-                        }
+                onClick: (event, elements) => {
+                    if (elements.length > 0) {
+                        const index = elements[0].index;
+                        const statusLabel = ['Assigned', 'In Progress', 'Hold', 'Cancelled', 'Reinstated', 'Reassigned', 'Completed on Time', 'Delayed Completion', 'Closed'][index];
+                        fetchTaskData(statusLabel);
                     }
                 }
-            });
-
-            function fetchTaskData(status) {
-                const encodedStatus = encodeURIComponent(status);
-                fetch(`fetch-tasks.php?status=${encodedStatus}`)
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! Status: ${response.status}`);
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        if (Array.isArray(data)) {
-                            populateModal(status, data);
-                        } else {
-                            console.error('Unexpected response format:', data);
-                            alert('Failed to fetch task data. Please try again.');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error fetching task data:', error);
-                        alert('Failed to fetch task data. Please try again.');
-                    });
             }
+        });
 
-            function populateModal(status, data) {
-                let modalId, tableBodyId;
-                switch (status) {
-                    case 'Assigned':
-                        modalId = 'pendingTasksModal';
-                        tableBodyId = 'pendingTasksTableBody';
-                        break;
-                    case 'In Progress':
-                        modalId = 'inProgressTasksModal';
-                        tableBodyId = 'inProgressTasksTableBody';
-                        break;
-                    case 'Hold':
-                        modalId = 'holdTasksModal';
-                        tableBodyId = 'holdTasksTableBody';
-                        break;
-                    case 'Cancelled':
-                        modalId = 'cancelledTasksModal';
-                        tableBodyId = 'cancelledTasksTableBody';
-                        break;
-                    case 'Reinstated':
-                        modalId = 'reinstatedTasksModal';
-                        tableBodyId = 'reinstatedTasksTableBody';
-                        break;
-                    case 'Reassigned':
-                        modalId = 'reassignedTasksModal';
-                        tableBodyId = 'reassignedTasksTableBody';
-                        break;
-                    case 'Completed on Time':
-                        modalId = 'completedTasksModal';
-                        tableBodyId = 'completedTasksTableBody';
-                        break;
-                    case 'Delayed Completion':
-                        modalId = 'delayedTasksModal';
-                        tableBodyId = 'delayedTasksTableBody';
-                        break;
-                    case 'Closed':
-                        modalId = 'closedTasksModal';
-                        tableBodyId = 'closedTasksTableBody';
-                        break;
-                    default:
-                        return;
-                }
-
-                const tableBody = document.getElementById(tableBodyId);
-                tableBody.innerHTML = '';
-
-                if (data.length === 0) {
-                    tableBody.innerHTML = '<tr><td colspan="5" class="text-center">No tasks found.</td></tr>';
-                } else {
-                    data.forEach((task, index) => {
-                        const row = document.createElement('tr');
-                        let displayDate;
-
-                        if ((status === 'Delayed Completion' || status === 'Completed on Time') && task.actual_completion_date) {
-                            displayDate = task.actual_completion_date;
-                        } else {
-                            displayDate = task.completion_date || task.start_date || task.planned_finish_date;
-                        }
-
-                        row.innerHTML = `
-                            <td>${index + 1}</td>
-                            <td>${task.task_name}</td>
-                            <td>${task.assigned_to}</td>
-                            <td>${task.department}</td>
-                            <td>${displayDate}</td>
-                        `;
-                        tableBody.appendChild(row);
-                    });
-                }
-
-                const modal = new bootstrap.Modal(document.getElementById(modalId));
-                modal.show();
-            }
-
-            // Task Completion Over Time (Line Chart)
-            const taskCompletionChart = new Chart(document.getElementById('taskCompletionChart'), {
-                type: 'line',
-                data: {
-                    labels: <?= json_encode(array_column($taskCompletionOverTime, 'month')) ?>,
-                    datasets: [{
-                        label: 'Tasks Completed',
-                        data: <?= json_encode(array_column($taskCompletionOverTime, 'tasks_completed')) ?>,
-                        fill: false,
-                        borderColor: '#36A2EB',
-                        tension: 0.1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                        },
-                        title: {
-                            display: true,
-                            text: 'Task Completion Over Time'
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        }
-                    }
-                }
-            });
-
-            <?php if (hasPermission('dashboard_tasks')): ?>
-                // Tasks by Department (Bar Chart)
-                const tasksByDepartmentChart = new Chart(document.getElementById('tasksByDepartmentChart'), {
-                    type: 'bar',
-                    data: {
-                        labels: <?= json_encode(array_column($tasksByDepartment, 'name')) ?>,
-                        datasets: [{
-                            label: 'Tasks by Department',
-                            data: <?= json_encode(array_column($tasksByDepartment, 'task_count')) ?>,
-                            backgroundColor: <?= json_encode($departmentColors) ?>,
-                            borderWidth: 1
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                position: 'bottom',
-                            },
-                            title: {
-                                display: true,
-                                text: 'Tasks by Department'
-                            }
-                        },
-                        scales: {
-                            y: {
-                                beginAtZero: true
-                            }
-                        }
-                    }
+        function fetchTaskData(status) {
+            fetch(`fetch-tasks.php?status=${encodeURIComponent(status)}`)
+                .then(response => response.json())
+                .then(data => populateModal(status, data))
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Failed to fetch task data.');
                 });
-            <?php endif; ?>
-        </script>
+        }
+
+        function populateModal(status, data) {
+            const modalId = {
+                'Assigned': 'pendingTasksModal',
+                'In Progress': 'inProgressTasksModal',
+                'Hold': 'holdTasksModal',
+                'Cancelled': 'cancelledTasksModal',
+                'Reinstated': 'reinstatedTasksModal',
+                'Reassigned': 'reassignedTasksModal',
+                'Completed on Time': 'completedTasksModal',
+                'Delayed Completion': 'delayedTasksModal',
+                'Closed': 'closedTasksModal'
+            }[status];
+            const tableBodyId = modalId.replace('Modal', 'TableBody');
+            const tableBody = document.getElementById(tableBodyId);
+            tableBody.innerHTML = data.length === 0 ? '<tr><td colspan="5" class="text-center">No tasks found.</td></tr>' : data.map((task, index) => `
+                <tr>
+                    <td>${index + 1}</td>
+                    <td>${task.task_name}</td>
+                    <td>${task.assigned_to}</td>
+                    <td>${task.department}</td>
+                    <td>${task.actual_completion_date || task.start_date || task.planned_finish_date}</td>
+                </tr>
+            `).join('');
+            const modal = new bootstrap.Modal(document.getElementById(modalId));
+            modal.show();
+        }
+
+        // Task Completion Over Time
+        const taskCompletionChart = new Chart(document.getElementById('taskCompletionChart'), {
+            type: 'line',
+            data: {
+                labels: <?= json_encode(array_column($taskCompletionOverTime, 'month')) ?>,
+                datasets: [{
+                    label: 'Tasks Completed',
+                    data: <?= json_encode(array_column($taskCompletionOverTime, 'tasks_completed')) ?>,
+                    fill: false,
+                    borderColor: '#36A2EB',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom' }, title: { display: true, text: 'Task Completion Over Time' } },
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+
+        <?php if (hasPermission('dashboard_tasks')): ?>
+            // Tasks by Department
+            const tasksByDepartmentChart = new Chart(document.getElementById('tasksByDepartmentChart'), {
+                type: 'bar',
+                data: {
+                    labels: <?= json_encode(array_column($tasksByDepartment, 'name')) ?>,
+                    datasets: [{
+                        label: 'Tasks by Department',
+                        data: <?= json_encode(array_column($tasksByDepartment, 'task_count')) ?>,
+                        backgroundColor: <?= json_encode($departmentColors) ?>,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' }, title: { display: true, text: 'Tasks by Department' } },
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+        <?php endif; ?>
+    </script>
 </body>
+
 </html>

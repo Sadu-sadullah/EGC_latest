@@ -26,10 +26,11 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
 }
 
 $user_id = $_SESSION['user_id'] ?? null;
-$user_role = $_SESSION['role'] ?? null;
+$selected_role_id = $_SESSION['selected_role_id'] ?? null;
 
-if ($user_id === null || $user_role === null) {
-    die("Error: User ID or role is not set. Please log in again.");
+if ($user_id === null || $selected_role_id === null) {
+    header("Location: portal-login.html");
+    exit;
 }
 
 $timeout_duration = 1200;
@@ -75,23 +76,34 @@ $conn->query("SET sql_mode=(SELECT REPLACE(@@sql_mode, 'ONLY_FULL_GROUP_BY', '')
 
 $departments = $conn->query("SELECT id, name FROM departments")->fetch_all(MYSQLI_ASSOC);
 $roles = $conn->query("SELECT id, name FROM roles")->fetch_all(MYSQLI_ASSOC);
-$projectQuery = $conn->query("SELECT id, project_name FROM projects");
-if ($projectQuery) {
-    $projects = $projectQuery->fetch_all(MYSQLI_ASSOC);
+if (hasPermission('view_all_projects')) {
+    $projectQuery = $conn->query("
+        SELECT id, project_name, start_date, end_date
+        FROM projects
+    ");
 } else {
-    die("Error fetching projects: " . $conn->error);
+    $projectStmt = $conn->prepare("
+        SELECT p.id, p.project_name, p.start_date, p.end_date
+        FROM projects p
+        JOIN user_departments ud ON p.department_id = ud.department_id
+        WHERE ud.user_id = ?
+    ");
+    $projectStmt->bind_param("i", $user_id);
+    $projectStmt->execute();
+    $projectQuery = $projectStmt->get_result();
 }
+$projects = $projectQuery->fetch_all(MYSQLI_ASSOC);
 
 $userQuery = $conn->prepare("
-    SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role 
+    SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role
     FROM users u
     JOIN user_departments ud ON u.id = ud.user_id
     JOIN departments d ON ud.department_id = d.id
-    JOIN roles r ON u.role_id = r.id
+    JOIN roles r ON r.id = ?
     WHERE u.id = ?
     GROUP BY u.id
 ");
-$userQuery->bind_param("i", $user_id);
+$userQuery->bind_param("ii", $selected_role_id, $user_id);
 $userQuery->execute();
 $userResult = $userQuery->get_result();
 
@@ -111,28 +123,37 @@ if ($userResult->num_rows > 0) {
 $users = [];
 if (hasPermission('assign_tasks')) {
     if (hasPermission('assign_to_any_user_tasks')) {
+        // Second Query: Fetch all users except those with Admin role
         $userQuery = "
-            SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role 
+            SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, GROUP_CONCAT(r.name SEPARATOR ', ') AS roles
             FROM users u
             JOIN user_departments ud ON u.id = ud.user_id
             JOIN departments d ON ud.department_id = d.id
-            JOIN roles r ON u.role_id = r.id
-            WHERE r.name != 'Admin'
+            LEFT JOIN user_roles ur ON u.id = ur.user_id
+            LEFT JOIN roles r ON ur.role_id = r.id
+            WHERE u.id NOT IN (
+                SELECT u2.id
+                FROM users u2
+                JOIN user_roles ur2 ON u2.id = ur2.user_id
+                JOIN roles r2 ON ur2.role_id = r2.id
+                WHERE r2.name = 'Admin'
+            )
             GROUP BY u.id
         ";
+        $stmt = $conn->prepare($userQuery);
     } else {
+        // Third Query: Fetch users in the same department
         $userQuery = "
-            SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role 
+            SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, GROUP_CONCAT(r.name SEPARATOR ', ') AS roles
             FROM users u
             JOIN user_departments ud ON u.id = ud.user_id
             JOIN departments d ON ud.department_id = d.id
-            JOIN roles r ON u.role_id = r.id
+            LEFT JOIN user_roles ur ON u.id = ur.user_id
+            LEFT JOIN roles r ON ur.role_id = r.id
             WHERE ud.department_id IN (SELECT department_id FROM user_departments WHERE user_id = ?)
             GROUP BY u.id
         ";
-    }
-    $stmt = $conn->prepare($userQuery);
-    if (!hasPermission('assign_to_any_user_tasks')) {
+        $stmt = $conn->prepare($userQuery);
         $stmt->bind_param("i", $user_id);
     }
     $stmt->execute();
@@ -925,7 +946,9 @@ function getWeekdayHours($start, $end)
                             <select id="project_id" name="project_id" class="form-control" required>
                                 <option value="">Select a project</option>
                                 <?php foreach ($projects as $project): ?>
-                                    <option value="<?= htmlspecialchars($project['id']) ?>">
+                                    <option value="<?= htmlspecialchars($project['id']) ?>"
+                                        data-start-date="<?= htmlspecialchars($project['start_date'] ?? '') ?>"
+                                        data-end-date="<?= htmlspecialchars($project['end_date'] ?? '') ?>">
                                         <?= htmlspecialchars($project['project_name']) ?>
                                     </option>
                                 <?php endforeach; ?>
@@ -979,78 +1002,6 @@ function getWeekdayHours($start, $end)
         </div>
     </div>
 
-    <div class="modal fade" id="createProjectModal" tabindex="-1" aria-labelledby="createProjectModalLabel"
-        aria-hidden="true">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="createProjectModalLabel">Manage Projects</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="manageProjectForm" method="POST">
-                        <div class="form-group">
-                            <label for="existing_projects">Existing Projects:</label>
-                            <select id="existing_projects" name="existing_projects" class="form-control">
-                                <option value="">Select an existing project</option>
-                                <?php foreach ($projects as $project): ?>
-                                    <option value="<?= htmlspecialchars($project['id']) ?>">
-                                        <?= htmlspecialchars($project['project_name']) ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="new_project_name">Project Name:</label>
-                            <input type="text" id="new_project_name" name="new_project_name" class="form-control"
-                                required>
-                        </div>
-                        <div class="form-group">
-                            <label for="project_type">Project Type:</label>
-                            <select id="project_type" name="project_type" class="form-control" required>
-                                <option value="Internal">Internal</option>
-                                <option value="External">External</option>
-                            </select>
-                        </div>
-                        <!-- External Project Fields -->
-                        <div id="external-project-fields" style="display: none;">
-                            <div class="form-group">
-                                <label for="customer_name">Customer Name:</label>
-                                <input type="text" id="customer_name" name="customer_name" class="form-control">
-                            </div>
-                            <div class="form-group">
-                                <label for="customer_email">Customer Email:</label>
-                                <input type="email" id="customer_email" name="customer_email" class="form-control">
-                            </div>
-                            <div class="form-group">
-                                <label for="customer_mobile">Customer Mobile:</label>
-                                <input type="text" id="customer_mobile" name="customer_mobile" class="form-control">
-                            </div>
-                            <div class="form-group">
-                                <label for="cost">Cost:</label>
-                                <input type="number" id="cost" name="cost" class="form-control" step="0.01" min="0">
-                            </div>
-                            <div class="form-group">
-                                <label for="project_manager">Project Manager:</label>
-                                <input type="text" id="project_manager" name="project_manager" class="form-control">
-                            </div>
-                        </div>
-                        <input type="hidden" name="project_id" id="project_id" value="">
-                        <input type="hidden" name="action" id="project_action" value="create">
-                        <input type="hidden" name="created_by_user_id" value="<?= $user_id ?>">
-                        <button type="submit" class="btn btn-primary" id="submitProjectBtn">Create Project</button>
-                        <button type="button" class="btn btn-warning" id="editProjectBtn" onclick="editProject()">Edit
-                            Project</button>
-                        <button type="button" class="btn btn-danger" onclick="deleteProject()">Delete Project</button>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <div class="dashboard-container">
         <div class="sidebar">
             <h3>TMS</h3>
@@ -1058,7 +1009,7 @@ function getWeekdayHours($start, $end)
             <?php if (hasPermission('view_projects')): ?>
                 <a href="projects.php">Projects</a>
             <?php endif; ?>
-            <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
+            <?php if (hasPermission('task_actions')): ?>
                 <a href="task-actions.php">Task Actions</a>
             <?php endif; ?>
             <?php if (hasPermission('tasks_archive')): ?>
@@ -1095,8 +1046,6 @@ function getWeekdayHours($start, $end)
                     <div class="filter-container">
                         <div class="filter-buttons">
                             <?php if (hasPermission('create_tasks')): ?>
-                                <button type="button" class="btn btn-primary" data-bs-toggle="modal"
-                                    data-bs-target="#createProjectModal">Create New Project</button>
                                 <button type="button" class="btn btn-primary" data-bs-toggle="modal"
                                     data-bs-target="#taskManagementModal">Create New Task</button>
                             <?php endif; ?>

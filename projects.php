@@ -12,10 +12,11 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
 }
 
 $user_id = $_SESSION['user_id'] ?? null;
-$user_role = $_SESSION['role'] ?? null;
+$selected_role_id = $_SESSION['selected_role_id'] ?? null;
 
-if ($user_id === null || $user_role === null) {
-    die("Error: User ID or role is not set. Please log in again.");
+if ($user_id === null || $selected_role_id === null) {
+    header("Location: portal-login.html");
+    exit;
 }
 
 $timeout_duration = 1200;
@@ -61,15 +62,15 @@ if ($sessionToken !== $_SESSION['session_token']) {
 
 // Fetch user details
 $userQuery = $conn->prepare("
-    SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role 
+    SELECT u.id, u.username, u.email, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments, r.name AS role
     FROM users u
     JOIN user_departments ud ON u.id = ud.user_id
     JOIN departments d ON ud.department_id = d.id
-    JOIN roles r ON u.role_id = r.id
+    JOIN roles r ON r.id = ?
     WHERE u.id = ?
     GROUP BY u.id
 ");
-$userQuery->bind_param("i", $user_id);
+$userQuery->bind_param("ii", $selected_role_id, $user_id);
 $userQuery->execute();
 $userResult = $userQuery->get_result();
 
@@ -80,6 +81,36 @@ if ($userResult->num_rows > 0) {
 } else {
     $loggedInUsername = "Unknown";
     $loggedInDepartment = "Unknown";
+}
+
+// Fetch departments for form dropdown
+$departments = [];
+if (hasPermission('create_projects') || hasPermission('create_projects_department')) {
+    if (hasPermission('create_projects')) {
+        $deptQuery = $conn->query("
+            SELECT id, name 
+            FROM departments 
+            ORDER BY name
+        ");
+        while ($row = $deptQuery->fetch_assoc()) {
+            $departments[] = $row;
+        }
+    } elseif (hasPermission('create_projects_department')) {
+        $deptQuery = $conn->prepare("
+            SELECT d.id, d.name 
+            FROM departments d
+            JOIN user_departments ud ON d.id = ud.department_id
+            WHERE ud.user_id = ?
+            ORDER BY d.name
+        ");
+        $deptQuery->bind_param("i", $user_id);
+        $deptQuery->execute();
+        $deptResult = $deptQuery->get_result();
+        while ($row = $deptResult->fetch_assoc()) {
+            $departments[] = $row;
+        }
+        $deptQuery->close();
+    }
 }
 
 // Pagination setup
@@ -95,9 +126,11 @@ $total_pages = ceil($total_projects / $projects_per_page);
 // Fetch projects for the current page
 $projects = [];
 $projectQuery = $conn->prepare("
-    SELECT p.id, p.project_name, p.project_type, p.start_date, p.end_date, 
-           p.customer_name, p.customer_email, p.customer_mobile, p.cost, p.project_manager
+    SELECT p.id, p.project_name, p.project_code, p.project_type, p.start_date, p.end_date, 
+           p.customer_name, p.customer_email, p.customer_mobile, p.cost, p.project_manager, 
+           d.name AS department_name
     FROM projects p
+    JOIN departments d ON p.department_id = d.id
     ORDER BY p.id DESC
     LIMIT ? OFFSET ?
 ");
@@ -106,7 +139,6 @@ $projectQuery->execute();
 $result = $projectQuery->get_result();
 
 while ($row = $result->fetch_assoc()) {
-    // Fetch tasks for this project to determine status
     $taskStmt = $conn->prepare("
         SELECT status 
         FROM tasks 
@@ -120,17 +152,19 @@ while ($row = $result->fetch_assoc()) {
         $row['status'] = 'No Tasks';
     } else {
         $statuses = array_column($tasks, 'status');
-        if (array_unique($statuses) === ['Assigned']) {
+        if (array_unique($statuses) === ['Assigned'] || array_unique($statuses) === ['Reassigned']) {
             $row['status'] = 'Assigned';
-        } elseif (in_array('Completed on Time', $statuses) || in_array('Delayed Completion', $statuses) || in_array('Closed', $statuses)) {
-            $allCompleted = true;
+        } elseif (in_array('In Progress', $statuses)) {
+            $row['status'] = 'In Progress';
+        } elseif (array_intersect($statuses, ['Completed on Time', 'Delayed Completion', 'Closed', 'Cancelled', 'Hold', 'Reinstated'])) {
+            $allInactive = true;
             foreach ($statuses as $status) {
-                if (!in_array($status, ['Completed on Time', 'Delayed Completion', 'Closed'])) {
-                    $allCompleted = false;
+                if (!in_array($status, ['Completed on Time', 'Delayed Completion', 'Closed', 'Cancelled', 'Hold', 'Reinstated'])) {
+                    $allInactive = false;
                     break;
                 }
             }
-            $row['status'] = $allCompleted ? 'Completed' : 'In Progress';
+            $row['status'] = $allInactive ? 'Completed' : 'In Progress';
         } else {
             $row['status'] = 'In Progress';
         }
@@ -144,7 +178,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action'])) {
     $action = $_POST['action'];
     $project_id = isset($_POST['project_id']) ? (int) $_POST['project_id'] : null;
     $project_name = trim($_POST['new_project_name']);
+    $project_code = trim($_POST['project_code']);
     $project_type = $_POST['project_type'];
+    $department_id = (int) $_POST['department_id'];
     $start_date = $_POST['start_date'];
     $end_date = $_POST['end_date'];
     $customer_name = $_POST['customer_name'] ?? null;
@@ -159,65 +195,123 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action'])) {
     $dateEndDate = new DateTime($end_date);
     $threeMonthsAhead = (clone $currentDateTime)->modify('+3 months');
 
-    // Validation
-    if (empty($project_name) || empty($project_type) || empty($start_date) || empty($end_date)) {
-        echo "<script>alert('Please fill in all required fields.');</script>";
-    } elseif ($dateStartDate < $currentDateTime) {
-        echo "<script>alert('Start date cannot be before the current date and time.');</script>";
-    } elseif ($dateEndDate < $currentDateTime) {
-        echo "<script>alert('End date cannot be before the current date and time.');</script>";
-    } elseif ($dateEndDate < $dateStartDate) {
-        echo "<script>alert('End date cannot be before the start date.');</script>";
-    } elseif ($dateEndDate > $threeMonthsAhead) {
-        echo "<script>alert('End date is too far in the future (more than 3 months ahead).');</script>";
+    // Validate inputs
+    if (empty($project_name) || empty($project_type) || empty($department_id) || empty($start_date) || empty($end_date) || empty($project_code)) {
+        echo "<script>alert('Please fill in all required fields, including project code.');</script>";
     } else {
-        if ($action === 'create') {
-            $stmt = $conn->prepare("
-                INSERT INTO projects (project_name, project_type, start_date, end_date, customer_name, customer_email, customer_mobile, cost, project_manager, created_by_user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ");
-            $stmt->bind_param(
-                "sssssssssi",
-                $project_name,
-                $project_type,
-                $start_date,
-                $end_date,
-                $customer_name,
-                $customer_email,
-                $customer_mobile,
-                $cost,
-                $project_manager,
-                $created_by_user_id
-            );
-        } elseif ($action === 'edit' && $project_id) {
-            $stmt = $conn->prepare("
-                UPDATE projects 
-                SET project_name = ?, project_type = ?, start_date = ?, end_date = ?, 
-                    customer_name = ?, customer_email = ?, customer_mobile = ?, cost = ?, project_manager = ?
-                WHERE id = ?
-            ");
-            $stmt->bind_param(
-                "sssssssssi",
-                $project_name,
-                $project_type,
-                $start_date,
-                $end_date,
-                $customer_name,
-                $customer_email,
-                $customer_mobile,
-                $cost,
-                $project_manager,
-                $project_id
-            );
+        // Determine reference date for validation
+        $referenceDate = $currentDateTime;
+        if ($action === 'edit' && $project_id) {
+            $dateCheckStmt = $conn->prepare("SELECT start_date FROM projects WHERE id = ?");
+            $dateCheckStmt->bind_param("i", $project_id);
+            $dateCheckStmt->execute();
+            $dateResult = $dateCheckStmt->get_result();
+            if ($dateResult->num_rows > 0) {
+                $existingStartDate = $dateResult->fetch_assoc()['start_date'];
+                $referenceDate = new DateTime($existingStartDate);
+            } else {
+                echo "<script>alert('Project not found.');</script>";
+                $dateCheckStmt->close();
+                exit;
+            }
+            $dateCheckStmt->close();
         }
 
-        if (isset($stmt) && $stmt->execute()) {
-            echo "<script>alert('Project " . ($action === 'create' ? 'created' : 'updated') . " successfully.'); window.location.href='projects.php';</script>";
+        // Validate dates
+        if ($dateStartDate < $referenceDate) {
+            echo "<script>alert('Start date cannot be before the " . ($action === 'edit' ? "project\'s last planned start date" : "current date and time") . ".');</script>";
+        } elseif ($dateEndDate < $referenceDate) {
+            echo "<script>alert('End date cannot be before the " . ($action === 'edit' ? "project\'s last planned start date" : "current date and time") . ".');</script>";
+        } elseif ($dateEndDate < $dateStartDate) {
+            echo "<script>alert('End date cannot be before the start date.');</script>";
+        } elseif ($dateEndDate > $threeMonthsAhead) {
+            echo "<script>alert('End date is too far in the future (more than 3 months ahead).');</script>";
         } else {
-            echo "<script>alert('Failed to " . $action . " project: " . ($stmt->error ?? $conn->error) . "');</script>";
+            // Check for duplicate project name in the same department
+            $checkStmt = $conn->prepare("
+                SELECT id 
+                FROM projects 
+                WHERE project_name = ? AND department_id = ? AND id != ?
+            ");
+            $checkStmt->bind_param("sii", $project_name, $department_id, $project_id);
+            $checkStmt->execute();
+            if ($checkStmt->get_result()->num_rows > 0) {
+                echo "<script>alert('A project with this name already exists in the selected department.');</script>";
+                $checkStmt->close();
+            } else {
+                $checkStmt->close();
+
+                // Validate project code uniqueness
+                $codeCheckStmt = $conn->prepare("
+                    SELECT id 
+                    FROM projects 
+                    WHERE project_code = ? AND id != ?
+                ");
+                $codeCheckStmt->bind_param("si", $project_code, $project_id);
+                $codeCheckStmt->execute();
+                if ($codeCheckStmt->get_result()->num_rows > 0) {
+                    echo "<script>alert('The project code is already in use.');</script>";
+                    $codeCheckStmt->close();
+                } else {
+                    $codeCheckStmt->close();
+
+                    if ($action === 'create') {
+                        $stmt = $conn->prepare("
+                            INSERT INTO projects (project_name, project_code, project_type, department_id, start_date, end_date, 
+                                customer_name, customer_email, customer_mobile, cost, project_manager, created_by_user_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ");
+                        $stmt->bind_param(
+                            "sssisssssssi",
+                            $project_name,
+                            $project_code,
+                            $project_type,
+                            $department_id,
+                            $start_date,
+                            $end_date,
+                            $customer_name,
+                            $customer_email,
+                            $customer_mobile,
+                            $cost,
+                            $project_manager,
+                            $created_by_user_id
+                        );
+                    } elseif ($action === 'edit' && $project_id) {
+                        $stmt = $conn->prepare("
+                            UPDATE projects 
+                            SET project_name = ?, project_code = ?, project_type = ?, department_id = ?, 
+                                start_date = ?, end_date = ?, customer_name = ?, customer_email = ?, 
+                                customer_mobile = ?, cost = ?, project_manager = ?
+                            WHERE id = ?
+                        ");
+                        $stmt->bind_param(
+                            "sssisssssssi",
+                            $project_name,
+                            $project_code,
+                            $project_type,
+                            $department_id,
+                            $start_date,
+                            $end_date,
+                            $customer_name,
+                            $customer_email,
+                            $customer_mobile,
+                            $cost,
+                            $project_manager,
+                            $project_id
+                        );
+                    }
+
+                    if (isset($stmt) && $stmt->execute()) {
+                        echo "<script>alert('Project " . ($action === 'create' ? 'created' : 'updated') . " successfully.'); window.location.href='projects.php';</script>";
+                    } else {
+                        echo "<script>alert('Failed to " . $action . " project: " . ($stmt->error ?? $conn->error) . "');</script>";
+                    }
+                    if (isset($stmt)) {
+                        $stmt->close();
+                    }
+                }
+            }
         }
-        if (isset($stmt))
-            $stmt->close();
     }
 }
 
@@ -231,7 +325,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
     $taskCheck->close();
 
     if ($taskCount > 0) {
-        echo "<script>alert('Cannot delete project. There are $taskCount task(s) associated with it.');</script>";
+        echo "<script>alert('Cannot delete project because it has $taskCount associated task(s). Please delete all tasks associated with this project first.');</script>";
     } else {
         $stmt = $conn->prepare("DELETE FROM projects WHERE id = ?");
         $stmt->bind_param("i", $project_id);
@@ -322,7 +416,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
-            min-width: 1000px;
+            min-width: 1200px;
         }
 
         th,
@@ -474,7 +568,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
             <?php if (hasPermission('view_projects')): ?>
                 <a href="projects.php">Projects</a>
             <?php endif; ?>
-            <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
+            <?php if (hasPermission('task_actions')): ?>
                 <a href="task-actions.php">Task Actions</a>
             <?php endif; ?>
             <?php if (hasPermission('tasks_archive')): ?>
@@ -505,11 +599,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
 
             <div class="project-container">
                 <h2>Projects</h2>
-                <?php if (hasPermission('create_projects')): ?>
+                <?php if (hasPermission('create_projects') || hasPermission('create_projects_department')): ?>
                     <form method="POST" id="projectForm">
                         <div class="form-group">
                             <label for="new_project_name">Project Name:</label>
                             <input type="text" id="new_project_name" name="new_project_name" class="form-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="project_code">Project Code:</label>
+                            <input type="text" id="project_code" name="project_code" class="form-control" readonly required>
+                        </div>
+                        <div class="form-group">
+                            <label for="department_id">Department:</label>
+                            <select id="department_id" name="department_id" class="form-control" required>
+                                <option value="">Select Department</option>
+                                <?php foreach ($departments as $dept): ?>
+                                    <option value="<?= $dept['id'] ?>"><?= htmlspecialchars($dept['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
                         </div>
                         <div class="form-group">
                             <label for="project_type">Project Type:</label>
@@ -559,7 +666,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
                     <thead>
                         <tr>
                             <th>#</th>
+                            <th>Project Code</th>
                             <th>Project Name</th>
+                            <th>Department</th>
                             <th>Project Type</th>
                             <th>Start Date</th>
                             <th>End Date</th>
@@ -575,11 +684,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
                         </tr>
                     </thead>
                     <tbody>
-                        <?php $index = ($page - 1) * $projects_per_page + 1;
-                        foreach ($projects as $project): ?>
+                        <?php $index = ($page - 1) * $projects_per_page + 1; ?>
+                        <?php foreach ($projects as $project): ?>
                             <tr>
                                 <td><?= $index++ ?></td>
+                                <td><?= htmlspecialchars($project['project_code']) ?></td>
                                 <td><?= htmlspecialchars($project['project_name']) ?></td>
+                                <td><?= htmlspecialchars($project['department_name']) ?></td>
                                 <td><?= htmlspecialchars($project['project_type']) ?></td>
                                 <td><?= $project['start_date'] ? htmlspecialchars(date("d M Y, h:i A", strtotime($project['start_date']))) : 'N/A' ?>
                                 </td>
@@ -644,6 +755,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
 
         function resetProjectForm() {
             document.getElementById('new_project_name').value = '';
+            document.getElementById('project_code').value = '';
+            document.getElementById('department_id').value = '';
             document.getElementById('project_type').value = 'Internal';
             document.getElementById('start_date').value = '';
             document.getElementById('end_date').value = '';
@@ -658,6 +771,32 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
             toggleExternalFields();
         }
 
+        function fetchProjectCode(departmentId, projectId = null) {
+            if (!departmentId) {
+                document.getElementById('project_code').value = '';
+                return;
+            }
+            fetch('get-project-code.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `department_id=${encodeURIComponent(departmentId)}&project_id=${encodeURIComponent(projectId || '')}`
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('project_code').value = data.project_code;
+                    } else {
+                        alert(data.message || 'Failed to generate project code.');
+                        document.getElementById('project_code').value = '';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching project code:', error);
+                    alert('Failed to generate project code.');
+                    document.getElementById('project_code').value = '';
+                });
+        }
+
         function editProject(projectId) {
             fetch('get-project-details.php', {
                 method: 'POST',
@@ -668,6 +807,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
                 .then(data => {
                     if (data.success) {
                         document.getElementById('new_project_name').value = data.project_name || '';
+                        document.getElementById('project_code').value = data.project_code || '';
+                        document.getElementById('department_id').value = data.department_id || '';
                         document.getElementById('project_type').value = data.project_type || 'Internal';
                         document.getElementById('start_date').value = data.start_date ? new Date(data.start_date).toISOString().slice(0, 16) : '';
                         document.getElementById('end_date').value = data.end_date ? new Date(data.end_date).toISOString().slice(0, 16) : '';
@@ -707,7 +848,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
                 })
                     .then(response => response.text())
                     .then(text => {
-                        // Response will be a script tag with alert and redirect
                         document.body.insertAdjacentHTML('beforeend', text);
                     })
                     .catch(error => {
@@ -718,11 +858,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
         }
 
         document.getElementById('project_type').addEventListener('change', toggleExternalFields);
+        document.getElementById('department_id').addEventListener('change', function () {
+            const departmentId = this.value;
+            const projectId = document.getElementById('project_id').value;
+            fetchProjectCode(departmentId, projectId);
+        });
 
         document.getElementById('projectForm').addEventListener('submit', function (event) {
             const submitBtn = document.getElementById('submitProjectBtn');
             submitBtn.disabled = true;
-            setTimeout(() => submitBtn.disabled = false, 2000); // Re-enable after 2 seconds
+            setTimeout(() => submitBtn.disabled = false, 2000);
         });
 
         document.addEventListener('DOMContentLoaded', function () {

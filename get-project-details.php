@@ -1,11 +1,12 @@
 <?php
-// Start session if needed (optional, only if you use session data here)
+// Start session
 session_start();
 
 // Set content type to JSON
 header('Content-Type: application/json');
 
-// Include config
+// Include permissions and config
+require 'permissions.php';
 $config = include '../config.php';
 
 // Database connection
@@ -22,8 +23,15 @@ if ($conn->connect_error) {
     exit;
 }
 
+// Check if user is logged in
+if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
+    echo json_encode(['success' => false, 'message' => 'Not logged in']);
+    exit;
+}
+
+// Verify request method
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid request method.']);
+    echo json_encode(['success' => false, 'message' => 'Invalid request method']);
     exit;
 }
 
@@ -31,14 +39,15 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 $projectId = isset($_POST['project_id']) ? (int) $_POST['project_id'] : null;
 
 if (!$projectId || $projectId === 0) {
-    echo json_encode(['success' => false, 'message' => 'No valid project ID provided.']);
+    echo json_encode(['success' => false, 'message' => 'No valid project ID provided']);
     exit;
 }
 
 try {
     // Prepare query to fetch all necessary project details
     $stmt = $conn->prepare("
-        SELECT project_name, project_type, customer_name, customer_email, customer_mobile, cost, project_manager 
+        SELECT project_name, project_code, project_type, department_id, start_date, end_date, 
+               customer_name, customer_email, customer_mobile, cost, project_manager
         FROM projects 
         WHERE id = ?
     ");
@@ -52,7 +61,11 @@ try {
         echo json_encode([
             'success' => true,
             'project_name' => $project['project_name'] ?? '',
+            'project_code' => $project['project_code'] ?? '',
             'project_type' => $project['project_type'] ?? 'Internal',
+            'department_id' => $project['department_id'] !== null ? (int) $project['department_id'] : '',
+            'start_date' => $project['start_date'] ?? '',
+            'end_date' => $project['end_date'] ?? '',
             'customer_name' => $project['customer_name'] ?? '',
             'customer_email' => $project['customer_email'] ?? '',
             'customer_mobile' => $project['customer_mobile'] ?? '',

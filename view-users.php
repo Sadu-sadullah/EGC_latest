@@ -19,12 +19,6 @@ require './PHPMailer-master/src/SMTP.php';
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
-// Check if the user is logged in
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['role'])) {
-    header("Location: login.php");
-    exit;
-}
-
 // Session timeout for 20 mins
 $timeout_duration = 1200;
 if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeout_duration) {
@@ -35,8 +29,14 @@ if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) >
 }
 $_SESSION['last_activity'] = time();
 
-$user_id = $_SESSION['user_id'];
-$user_role = $_SESSION['role'];
+$user_id = $_SESSION['user_id'] ?? null;
+$selected_role_id = $_SESSION['selected_role_id'] ?? null;
+
+if ($user_id === null || $selected_role_id === null) {
+    header("Location: portal-login.html");
+    exit;
+}
+
 $user_departments = $_SESSION['departments'] ?? [];
 $user_username = $_SESSION['username'];
 
@@ -47,6 +47,12 @@ function validatePassword($password)
     $number = preg_match('@\d@', $password);
     $specialChar = preg_match('@[^\w]@', $password);
     return $uppercase && $number && $specialChar && strlen($password) >= 8;
+}
+
+// Function to validate email
+function validateEmail($email)
+{
+    return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
 }
 
 // Database connection
@@ -67,12 +73,21 @@ try {
     // Fetch users based on role
     if (hasPermission('read_all_users')) {
         $stmt = $pdo->prepare("
-            SELECT u.id, u.username, u.email, r.name AS role_name, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments
+            SELECT u.id, u.username, u.email,
+                   GROUP_CONCAT(DISTINCT r.name SEPARATOR ', ') AS role_names,
+                   GROUP_CONCAT(DISTINCT d.name SEPARATOR ', ') AS departments
             FROM users u
-            LEFT JOIN roles r ON u.role_id = r.id
+            LEFT JOIN user_roles ur ON u.id = ur.user_id
+            LEFT JOIN roles r ON ur.role_id = r.id
             LEFT JOIN user_departments ud ON u.id = ud.user_id
             LEFT JOIN departments d ON ud.department_id = d.id
-            WHERE r.name != 'Admin'
+            WHERE u.id NOT IN (
+                SELECT u2.id
+                FROM users u2
+                JOIN user_roles ur2 ON u2.id = ur2.user_id
+                JOIN roles r2 ON ur2.role_id = r2.id
+                WHERE r2.name = 'Admin'
+            )
             GROUP BY u.id
             ORDER BY u.username
         ");
@@ -80,13 +95,22 @@ try {
     } elseif (hasPermission('read_department_users')) {
         $departmentPlaceholders = implode(',', array_fill(0, count($user_departments), '?'));
         $stmt = $pdo->prepare("
-            SELECT u.id, u.username, u.email, r.name AS role_name, GROUP_CONCAT(d.name SEPARATOR ', ') AS departments
+            SELECT u.id, u.username, u.email,
+                   GROUP_CONCAT(DISTINCT r.name SEPARATOR ', ') AS role_names,
+                   GROUP_CONCAT(DISTINCT d.name SEPARATOR ', ') AS departments
             FROM users u
-            LEFT JOIN roles r ON u.role_id = r.id
+            LEFT JOIN user_roles ur ON u.id = ur.user_id
+            LEFT JOIN roles r ON ur.role_id = r.id
             LEFT JOIN user_departments ud ON u.id = ud.user_id
             LEFT JOIN departments d ON ud.department_id = d.id
-            WHERE d.name IN ($departmentPlaceholders) 
-              AND r.name NOT IN ('Admin') 
+            WHERE d.name IN ($departmentPlaceholders)
+              AND u.id NOT IN (
+                  SELECT u2.id
+                  FROM users u2
+                  JOIN user_roles ur2 ON u2.id = ur2.user_id
+                  JOIN roles r2 ON ur2.role_id = r2.id
+                  WHERE r2.name = 'Admin'
+              )
               AND u.id != ?
             GROUP BY u.id
             ORDER BY u.username
@@ -117,8 +141,17 @@ try {
             $tempPassword = 'RESET_REQUIRED'; // Unhashed, acts as a flag
 
             // Re-insert into users table with temporary password
-            $restoreStmt = $pdo->prepare("INSERT INTO users (id, username, email, role_id, password) VALUES (?, ?, ?, ?, ?)");
-            $restoreStmt->execute([$audit['user_id'], $audit['username'], $audit['email'], $audit['role_id'], $tempPassword]);
+            $restoreStmt = $pdo->prepare("INSERT INTO users (id, username, email, password) VALUES (?, ?, ?, ?)");
+            $restoreStmt->execute([$audit['user_id'], $audit['username'], $audit['email'], $tempPassword]);
+
+            // Restore roles
+            if (!empty($audit['role_id'])) {
+                $roleIds = explode(',', $audit['role_id']);
+                $roleStmt = $pdo->prepare("INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)");
+                foreach ($roleIds as $roleId) {
+                    $roleStmt->execute([$audit['user_id'], trim($roleId)]);
+                }
+            }
 
             // Restore departments
             if (!empty($audit['departments'])) {
@@ -146,20 +179,20 @@ try {
         exit;
     }
 
-    // Fetch audit trail data (unchanged)
+    // Fetch audit trail data
     if (hasPermission('read_all_users')) {
         $auditStmt = $pdo->prepare("
-        SELECT uda.*, u.username AS deleted_by_username
-        FROM user_deletion_audit uda
-        LEFT JOIN users u ON uda.deleted_by = u.id
-        ORDER BY uda.deleted_at DESC
-    ");
+            SELECT uda.*, u.username AS deleted_by_username
+            FROM user_deletion_audit uda
+            LEFT JOIN users u ON uda.deleted_by = u.id
+            ORDER BY uda.deleted_at DESC
+        ");
         $auditStmt->execute();
         $auditRecords = $auditStmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     // Handle delete request initiation
-    if (isset($_POST['initiate_delete']) && hasPermission('read_all_users')) { // Only Admins can delete
+    if (isset($_POST['initiate_delete']) && hasPermission('read_all_users')) {
         $delete_user_id = $_POST['user_id'];
         $stmt = $pdo->prepare("SELECT email, username FROM users WHERE id = ?");
         $stmt->execute([$delete_user_id]);
@@ -176,15 +209,15 @@ try {
             // Calculate expiry time in user's timezone
             $dateTime = new DateTime('now', new DateTimeZone($userTimezone));
             $dateTime->modify('+15 minutes');
-            $expiryDisplay = $dateTime->format('Y-m-d H:i:s'); // For email display
-            $expiryTimestamp = $dateTime->getTimestamp(); // For session storage
+            $expiryDisplay = $dateTime->format('Y-m-d H:i:s');
+            $expiryTimestamp = $dateTime->getTimestamp();
 
             $_SESSION['pending_deletion'] = [
                 'user_id' => $delete_user_id,
                 'email' => $email,
                 'username' => $username,
                 'otp' => $otp,
-                'otp_expiry' => $expiryTimestamp // Store as timestamp
+                'otp_expiry' => $expiryTimestamp
             ];
 
             // Send OTP via email
@@ -210,7 +243,9 @@ try {
                 $_SESSION['successMsg'] = "An OTP has been sent to $email to confirm the deletion of $username.";
                 $_SESSION['showDeleteOtpForm'] = true;
             } catch (Exception $e) {
-                $_SESSION['errorMsg'] = "Failed to send OTP for deletion. Please try again.";
+                // Log detailed error
+                error_log("PHPMailer Error (Deletion): " . $e->getMessage() . " | Email: $email");
+                $_SESSION['errorMsg'] = "Failed to send OTP for deletion: " . $e->getMessage();
             }
         } else {
             $_SESSION['errorMsg'] = "User not found.";
@@ -220,22 +255,25 @@ try {
     }
 
 } catch (PDOException $e) {
+    error_log("Database Error: " . $e->getMessage());
     die("Error: " . $e->getMessage());
 }
 
-// Handle form submissions (user creation remains unchanged)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) {
+// Handle form submissions
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete']) && !isset($_POST['restore_user_id'])) {
     if (isset($_POST['username']) && !isset($_POST['otp'])) {
         $username = trim($_POST['username']);
         $email = trim($_POST['email']);
         $password = trim($_POST['password']);
-        $role_id = intval($_POST['role']);
-        $department_ids = $_POST['departments'];
+        $role_ids = isset($_POST['roles']) ? $_POST['roles'] : [];
+        $department_ids = isset($_POST['departments']) ? $_POST['departments'] : [];
 
-        if (empty($username) || empty($email) || empty($password) || empty($role_id) || empty($department_ids)) {
+        if (empty($username) || empty($email) || empty($password) || empty($role_ids) || empty($department_ids)) {
             $_SESSION['errorMsg'] = "Please fill in all fields.";
         } elseif (!validatePassword($password)) {
             $_SESSION['errorMsg'] = "Password must contain at least one uppercase letter, one number, one special character, and be at least 8 characters long.";
+        } elseif (!validateEmail($email)) {
+            $_SESSION['errorMsg'] = "Invalid email address.";
         } else {
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = ? OR email = ?");
             $stmt->execute([$username, $email]);
@@ -247,7 +285,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
                     'username' => $username,
                     'email' => $email,
                     'password' => $password,
-                    'role_id' => $role_id,
+                    'role_ids' => $role_ids,
                     'department_ids' => $department_ids,
                     'otp' => $otp,
                     'otp_expiry' => time() + 900
@@ -255,6 +293,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
 
                 $mail = new PHPMailer(true);
                 try {
+                    // Enable verbose debug output
+                    $mail->SMTPDebug = 2;
+                    $mail->Debugoutput = function ($str, $level) {
+                        error_log("PHPMailer Debug (Creation): $str");
+                    };
+
                     $mail->isSMTP();
                     $mail->Host = 'smtp.zoho.com';
                     $mail->SMTPAuth = true;
@@ -271,11 +315,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
                     $mail->Body = "Hello,<br><br>Your One-Time Password (OTP) to verify your email for user creation is: <strong>$otp</strong><br><br>This OTP will expire in 15 minutes.<br><br>Please provide this OTP to the administrator to complete your account creation.";
                     $mail->AltBody = "Hello,\n\nYour OTP to verify your email for user creation is: $otp\n\nThis OTP will expire in 15 minutes.\n\nPlease provide this OTP to the administrator.";
 
-                    $mail->send();
+                    if (!$mail->send()) {
+                        throw new Exception("PHPMailer failed to send email.");
+                    }
                     $_SESSION['successMsg'] = "An OTP has been sent to $email. Please verify it to complete user creation.";
                     $_SESSION['showOtpForm'] = true;
                 } catch (Exception $e) {
-                    $_SESSION['errorMsg'] = "Failed to send OTP. Please try again.";
+                    // Log detailed error
+                    error_log("PHPMailer Error (Creation): " . $e->getMessage() . " | Email: $email | SMTP Error: " . $mail->ErrorInfo);
+                    $_SESSION['errorMsg'] = "Failed to send OTP: " . $e->getMessage();
                 }
             }
         }
@@ -294,16 +342,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
             $username = $pending_user['username'];
             $email = $pending_user['email'];
             $password = password_hash($pending_user['password'], PASSWORD_DEFAULT);
-            $role_id = $pending_user['role_id'];
+            $role_ids = $pending_user['role_ids'];
             $department_ids = $pending_user['department_ids'];
 
-            $stmt = $pdo->prepare("INSERT INTO users (username, email, password, role_id) VALUES (?, ?, ?, ?)");
-            $stmt->execute([$username, $email, $password, $role_id]);
+            // Insert user without role_id
+            $stmt = $pdo->prepare("INSERT INTO users (username, email, password) VALUES (?, ?, ?)");
+            $stmt->execute([$username, $email, $password]);
             $newUserId = $pdo->lastInsertId();
 
-            $stmt = $pdo->prepare("INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)");
+            // Insert roles
+            $roleStmt = $pdo->prepare("INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)");
+            foreach ($role_ids as $role_id) {
+                $roleStmt->execute([$newUserId, intval($role_id)]);
+            }
+
+            // Insert departments
+            $deptStmt = $pdo->prepare("INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)");
             foreach ($department_ids as $department_id) {
-                $stmt->execute([$newUserId, intval($department_id)]);
+                $deptStmt->execute([$newUserId, intval($department_id)]);
             }
 
             unset($_SESSION['pending_user']);
@@ -667,7 +723,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
             <?php if (hasPermission('view_projects')): ?>
                 <a href="projects.php">Projects</a>
             <?php endif; ?>
-            <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
+            <?php if (hasPermission('task_actions')): ?>
                 <a href="task-actions.php">Task Actions</a>
             <?php endif; ?>
             <?php if (hasPermission('tasks_archive')): ?>
@@ -723,7 +779,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
                                         <th>#</th>
                                         <th>Username</th>
                                         <th>Email</th>
-                                        <th>Role</th>
+                                        <th>Roles</th>
                                         <th>Departments</th>
                                         <th>Actions</th>
                                     </tr>
@@ -735,7 +791,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
                                             <td><?= $count++ ?></td>
                                             <td><?= htmlspecialchars($user['username']) ?></td>
                                             <td><?= htmlspecialchars($user['email']) ?></td>
-                                            <td><?= htmlspecialchars($user['role_name']) ?></td>
+                                            <td><?= htmlspecialchars($user['role_names'] ?: 'None') ?></td>
                                             <td><?= !empty($user['departments']) ? htmlspecialchars($user['departments']) : 'None' ?>
                                             </td>
                                             <td>
@@ -766,7 +822,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
                                     <tr>
                                         <th>Username</th>
                                         <th>Email</th>
-                                        <th>Role</th>
+                                        <th>Roles</th>
                                         <th>Departments</th>
                                     </tr>
                                 </thead>
@@ -775,7 +831,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
                                         <tr>
                                             <td><?= htmlspecialchars($user['username']) ?></td>
                                             <td><?= htmlspecialchars($user['email']) ?></td>
-                                            <td><?= htmlspecialchars($user['role_name']) ?></td>
+                                            <td><?= htmlspecialchars($user['role_names'] ?: 'None') ?></td>
                                             <td><?= !empty($user['departments']) ? htmlspecialchars($user['departments']) : 'None' ?>
                                             </td>
                                         </tr>
@@ -819,7 +875,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
                                                         <th>#</th>
                                                         <th>Username</th>
                                                         <th>Email</th>
-                                                        <th>Role</th>
+                                                        <th>Roles</th>
                                                         <th>Departments</th>
                                                         <th>Deleted By</th>
                                                         <th>Deleted At</th>
@@ -835,9 +891,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
                                                             <td><?= htmlspecialchars($record['email']) ?></td>
                                                             <td>
                                                                 <?php
+                                                                $roleIds = explode(',', $record['role_id']);
+                                                                $roleNames = [];
                                                                 $roleStmt = $pdo->prepare("SELECT name FROM roles WHERE id = ?");
-                                                                $roleStmt->execute([$record['role_id']]);
-                                                                echo htmlspecialchars($roleStmt->fetchColumn());
+                                                                foreach ($roleIds as $roleId) {
+                                                                    $roleStmt->execute([trim($roleId)]);
+                                                                    $name = $roleStmt->fetchColumn();
+                                                                    if ($name) {
+                                                                        $roleNames[] = htmlspecialchars($name);
+                                                                    }
+                                                                }
+                                                                echo implode(', ', $roleNames) ?: 'None';
                                                                 ?>
                                                             </td>
                                                             <td><?= htmlspecialchars($record['departments'] ?: 'None') ?></td>
@@ -930,8 +994,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
                             <input type="email" id="email" name="email" class="form-control" required>
                         </div>
                         <div class="form-group mb-3">
-                            <label for="role">Role</label>
-                            <select id="role" name="role" class="form-control" required>
+                            <label for="roles">Roles</label>
+                            <select id="roles" name="roles[]" class="form-control" multiple required>
                                 <?php foreach ($roles as $role): ?>
                                     <option value="<?= $role['id'] ?>"><?= htmlspecialchars($role['name']) ?></option>
                                 <?php endforeach; ?>
@@ -957,12 +1021,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
 
     <!-- Jquery -->
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
-    <!-- Select 2 -->
+    <!-- Select2 -->
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
         $(document).ready(function () {
+            $('#roles').select2({
+                placeholder: "Select roles",
+                allowClear: true,
+                closeOnSelect: false
+            });
             $('#departments').select2({
                 placeholder: "Select departments",
                 allowClear: true,
@@ -972,7 +1041,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
 
         document.getElementById('createUserForm').addEventListener('submit', function (event) {
             const password = document.getElementById('password').value;
+            const email = document.getElementById('email').value;
             const passwordError = document.getElementById('passwordError');
+            const roles = document.getElementById('roles');
             const departments = document.getElementById('departments');
 
             if (!validatePassword(password)) {
@@ -980,6 +1051,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
                 passwordError.style.display = 'block';
             } else {
                 passwordError.style.display = 'none';
+            }
+
+            if (!validateEmail(email)) {
+                event.preventDefault();
+                alert('Please enter a valid email address.');
+            }
+
+            if (roles.selectedOptions.length === 0) {
+                event.preventDefault();
+                alert('Please select at least one role.');
             }
 
             if (departments.selectedOptions.length === 0) {
@@ -993,6 +1074,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['initiate_delete'])) 
             const number = /\d/.test(password);
             const specialChar = /[^\w]/.test(password);
             return uppercase && number && specialChar && password.length >= 8;
+        }
+
+        function validateEmail(email) {
+            const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return re.test(email);
         }
     </script>
 </body>

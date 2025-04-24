@@ -8,8 +8,10 @@ session_start();
 
 require 'permissions.php';
 
-// Check if the user is logged in and has admin role
-if (!isset($_SESSION['loggedin']) || $_SESSION['role'] !== 'Admin') {
+$user_id = $_SESSION['user_id'] ?? null;
+$selected_role_id = $_SESSION['selected_role_id'] ?? null;
+
+if ($user_id === null || $selected_role_id === null) {
     header("Location: portal-login.html");
     exit;
 }
@@ -383,7 +385,7 @@ try {
             <?php if (hasPermission('view_projects')): ?>
                 <a href="projects.php">Projects</a>
             <?php endif; ?>
-            <?php if (hasPermission('update_tasks') || hasPermission('update_tasks_all')): ?>
+            <?php if (hasPermission('task_actions')): ?>
                 <a href="task-actions.php">Task Actions</a>
             <?php endif; ?>
             <?php if (hasPermission('tasks_archive')): ?>
